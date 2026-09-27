@@ -52,12 +52,16 @@
 
 ## Phase 4 — Fundamental Analysis Engine
 
-- [ ] Ingest income statement, balance sheet, cash flow data for the 5 companies
-- [ ] Compute ratios: P/E, P/B, P/S, EV/EBITDA, ROE, ROCE, Debt/Equity, Current Ratio, Interest Coverage, Dividend Yield
-- [ ] Compute growth metrics (revenue/EPS/FCF growth and CAGR) and ownership data (promoter/FII/DII holding)
-- [ ] Combine into a Fundamental Score (0–100)
+- [x] Ingest income statement, balance sheet, cash flow data for the 5 companies
+- [x] Compute ratios: P/E, P/B, P/S, EV/EBITDA, ROE, ROCE, Debt/Equity, Current Ratio, Interest Coverage, Dividend Yield
+- [x] Compute growth metrics (revenue/EPS/FCF growth and CAGR) and ownership data (promoter/FII/DII holding)
+- [x] Combine into a Fundamental Score (0–100)
 
-**DoD:** Fundamentals module in `src/fundamentals/` producing scores for all 5 stocks from raw filings/statements.
+**DoD:** Fundamentals module in `src/fundamentals/` producing scores for all 5 stocks from raw filings/statements. Met — `src/fundamentals/{statements,ratios,score}.py`, 10 tests in `tests/test_fundamentals.py` with hand-computed reference values. `notebooks/04_fundamental_features.ipynb` produces `data/processed/fundamentals_snapshot.csv` (score range 45.5–74.5, zero NaN) and `fundamentals_annual.parquet` for all 5 stocks.
+
+Data-source notes:
+- Bank income statements (HDFCBANK) don't report EBIT/EBITDA or a current-assets/liabilities split, so ROCE/current ratio/interest coverage are `NaN` for it by design — the Fundamental Score itself only needs ROE/Debt-Equity/revenue growth/P·E, all of which are available for every stock.
+- Ownership data uses Yahoo's `heldPercentInsiders`/`heldPercentInstitutions` as proxies for promoter/institutional holding — these are not split into FII/DII as NSE/BSE disclosures do, and pledged-share data isn't available from this source.
 
 ---
 
