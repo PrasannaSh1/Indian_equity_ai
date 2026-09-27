@@ -7,3 +7,7 @@ def test_to_nse_ticker_appends_suffix():
 
 def test_to_nse_ticker_is_idempotent():
     assert to_nse_ticker("RELIANCE.NS") == "RELIANCE.NS"
+
+
+def test_to_nse_ticker_passes_through_index_tickers():
+    assert to_nse_ticker("^nsei") == "^NSEI"

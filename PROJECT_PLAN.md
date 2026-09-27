@@ -30,11 +30,11 @@
 
 ## Phase 2 — Exploratory Data Analysis
 
-- [ ] Compute returns: daily, weekly, monthly, 5-day, 20-day, 60-day
-- [ ] Compute rolling volatility (10/20/30/60-day), max drawdown, beta
-- [ ] Compute correlation vs NIFTY 50 and sector peers
+- [x] Compute returns: daily, weekly, monthly, 5-day, 20-day, 60-day
+- [x] Compute rolling volatility (10/20/30/60-day), max drawdown, beta
+- [x] Compute correlation vs NIFTY 50 and sector peers
 
-**DoD:** Stock analytics report/notebook produced for all 5 stocks.
+**DoD:** Stock analytics report/notebook produced for all 5 stocks. ✅ Met — `notebooks/02_returns_and_risk.ipynb` produces `data/processed/stock_analytics_report.csv` (drawdown, beta vs NIFTY 50, weekly/monthly return volatility) and `correlation_matrix.csv` for all 5 stocks. Sector-index correlation covers TCS/INFY (`^CNXIT`) and HDFCBANK (`^NSEBANK`); ITC's and RELIANCE's Yahoo Finance sector indices (`^CNXFMCG`, `^CNXENERGY`) return near-empty history and are skipped with a note in the notebook — NIFTY 50 and cross-stock correlation are still complete for all 5.
 
 ---
 
