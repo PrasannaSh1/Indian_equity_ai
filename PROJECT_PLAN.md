@@ -20,11 +20,11 @@
 
 ## Phase 1 — Historical Market Data
 
-- [ ] Start with RELIANCE only: download, load into Pandas, inspect, clean historical OHLCV
-- [ ] Calculate daily returns and rolling volatility; plot price; save cleaned dataset
-- [ ] Expand the same pipeline to the full 5-stock universe: RELIANCE, TCS, INFY, HDFCBANK, ITC (5 years daily OHLCV)
+- [x] Start with RELIANCE only: download, load into Pandas, inspect, clean historical OHLCV
+- [x] Calculate daily returns and rolling volatility; plot price; save cleaned dataset
+- [x] Expand the same pipeline to the full 5-stock universe: RELIANCE, TCS, INFY, HDFCBANK, ITC (5 years daily OHLCV)
 
-**DoD:** `01_stock_data_exploration.ipynb` runs clean for all 5 stocks; data validated (no missing/duplicate/invalid values) and saved to `data/processed/`.
+**DoD:** `01_stock_data_exploration.ipynb` runs clean for all 5 stocks; data validated (no missing/duplicate/invalid values) and saved to `data/processed/`. ✅ Met — 1,241 rows/symbol (2021-09-27 to 2026-09-25), zero data-quality issues on the cleaned set, saved as per-symbol parquet files plus a combined `prices_daily.parquet`.
 
 ---
 
