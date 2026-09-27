@@ -40,13 +40,13 @@
 
 ## Phase 3 — Technical Analysis Engine
 
-- [ ] Trend indicators: SMA (20/50/100/200), EMA (20/50)
-- [ ] Momentum indicators: RSI, MACD, ROC, Stochastic Oscillator, ADX
-- [ ] Volatility indicators: ATR, Bollinger Bands, Bollinger Band Width
-- [ ] Volume indicators: Volume MA, Volume Ratio, OBV, VWAP
-- [ ] Combine into a single Technical Score (0–100)
+- [x] Trend indicators: SMA (20/50/100/200), EMA (20/50)
+- [x] Momentum indicators: RSI, MACD, ROC, Stochastic Oscillator, ADX
+- [x] Volatility indicators: ATR, Bollinger Bands, Bollinger Band Width
+- [x] Volume indicators: Volume MA, Volume Ratio, OBV, VWAP
+- [x] Combine into a single Technical Score (0–100)
 
-**DoD:** Reusable technical-features module in `src/technical/`, validated against at least one known reference calculation per indicator.
+**DoD:** Reusable technical-features module in `src/technical/`, validated against at least one known reference calculation per indicator. Met — `src/technical/{trend,momentum,volatility,volume,indicators,score}.py`, each indicator checked against a hand-computed or analytically-derived reference value in `tests/test_technical.py` (15 tests). `notebooks/03_technical_features.ipynb` computes the full set for all 5 stocks and saves `data/processed/technical_features.parquet`.
 
 ---
 
