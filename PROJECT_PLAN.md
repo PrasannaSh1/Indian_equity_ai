@@ -67,11 +67,11 @@ Data-source notes:
 
 ## Phase 5 — Baseline ML Models
 
-- [ ] Build ML dataset with target `next_day_direction` from Phase 1–3 features
-- [ ] Use strict chronological splits — no random shuffling, no look-ahead leakage
-- [ ] Train/evaluate progressively: naive baseline → Logistic Regression → Random Forest → XGBoost → LightGBM
+- [x] Build ML dataset with target `next_day_direction` from Phase 1–3 features
+- [x] Use strict chronological splits — no random shuffling, no look-ahead leakage
+- [x] Train/evaluate progressively: naive baseline → Logistic Regression → Random Forest → XGBoost → LightGBM
 
-**DoD:** Baseline model evaluated with classification metrics (accuracy, precision, recall, F1, ROC-AUC, log loss, Brier score); written note on what worked, what didn't, and which features mattered.
+**DoD:** Baseline model evaluated with classification metrics (accuracy, precision, recall, F1, ROC-AUC, log loss, Brier score); written note on what worked, what didn't, and which features mattered. Met — `src/models/{dataset,baseline,evaluate}.py` (13 tests), `notebooks/05_baseline_ml.ipynb` trains all 5 models with a 70/15/15 chronological split (5,210 rows, all 5 stocks pooled). Validation ROC-AUC clusters near 0.50 (naive 0.50, logistic/RF/XGBoost/LightGBM all in the ~0.47–0.52 range) — expected for price/technical-only next-day direction, and a useful sanity check that nothing is leaking (a dramatically higher score would be the red flag). Top features by importance: `atr_pct`, `return_5d`, `volatility_20d`, `rsi_14`, `price_to_sma20/50`. Full written reflection is in the notebook's final markdown cell.
 
 ---
 
