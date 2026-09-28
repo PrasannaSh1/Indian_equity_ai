@@ -92,12 +92,18 @@ Windows-specific bug found and fixed: `torch` (via `transformers`) fails to load
 
 ## Phase 7 — Multimodal ML Model
 
-- [ ] Combine price, technical, fundamental, news/sentiment, macro, and market-regime features into one feature vector
-- [ ] Build the market regime engine (bull/bear × high/low volatility classification) as an additional feature
-- [ ] Train an ensemble combining per-modality models with a **learned** meta-model (not fixed weights)
-- [ ] Validate hypotheses H1–H5 using walk-forward validation
+- [x] Combine price, technical, fundamental, news/sentiment, macro, and market-regime features into one feature vector
+- [x] Build the market regime engine (bull/bear × high/low volatility classification) as an additional feature
+- [x] Train an ensemble combining per-modality models with a **learned** meta-model (not fixed weights)
+- [x] Validate hypotheses H1–H5 using walk-forward validation
 
-**DoD:** Multimodal ensemble outperforms the Phase 5 baseline on held-out chronological test data.
+**DoD:** Multimodal ensemble outperforms the Phase 5 baseline on held-out chronological test data. Partially met, reported honestly rather than oversold — see below.
+
+Built: `src/macro/{ingestion,features}.py`, `src/regime/classifier.py` (point-in-time-safe, expanding-median volatility threshold), `src/models/{multimodal_dataset,ensemble,walkforward}.py` (18 new tests, 73 total). `notebooks/07_multimodal_model.ipynb` merges Phases 3/4/6 + new macro/regime data into 2,530 rows across all 5 stocks (2024-05-30 to 2026-09-24 — fundamentals' fiscal-year-plus-reporting-lag requirement is what shrinks the usable window vs. Phase 5's wider range), trains a stacking ensemble (per-modality LightGBM base models + a learned logistic-regression meta-model fit on validation-set predictions), and runs 4 expanding-window walk-forward folds.
+
+**Result, stated plainly:** on the single train/val/test split, the multimodal ensemble does beat the technical-only baseline (ROC-AUC 0.531 vs 0.466) — satisfying the DoD's literal comparison. But the walk-forward view (4 folds, more trustworthy than one split) shows the *opposite*: technical-only alone scores best (mean ROC-AUC 0.538) while the ensemble (simple-average across folds, 0.509) and every other individual modality (fundamental 0.495, macro_regime 0.499, news exactly 0.500) sit at or below base rate. The single-split "win" looks like a favorable-window artifact rather than a real effect — reported honestly rather than cherry-picked. Root cause: fundamentals/news/macro_regime are currently weak-to-uninformative modalities (data-availability limits from Phases 4/6), so stacking them with a genuinely useful technical model mostly adds noise. Full numbers and per-hypothesis (H1–H5) discussion are in the notebook's final reflection cell.
+
+Real bug found and fixed during this phase: the initial `FUNDAMENTAL_FEATURE_COLUMNS` included `roce`/`current_ratio`/`interest_coverage`, which are `NaN` for every HDFCBANK fiscal year (banks don't report EBIT) — the dataset's single `dropna` silently excluded HDFCBANK entirely (100%) before this was caught and fixed to reuse Phase 4's already-solved universally-available column set.
 
 ---
 
