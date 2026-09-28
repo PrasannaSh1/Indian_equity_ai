@@ -77,12 +77,16 @@ Data-source notes:
 
 ## Phase 6 — News Intelligence & Sentiment (NLP)
 
-- [ ] Build news ingestion + deduplication + company/entity resolution pipeline
-- [ ] Apply FinBERT for financial sentiment (positive/neutral/negative probabilities — not a single label)
-- [ ] Classify events (earnings, dividend, M&A, debt, management change, etc.)
-- [ ] Estimate historical event impact per event type (e.g. average effect at +1d/+5d/+20d)
+- [x] Build news ingestion + deduplication + company/entity resolution pipeline
+- [x] Apply FinBERT for financial sentiment (positive/neutral/negative probabilities — not a single label)
+- [x] Classify events (earnings, dividend, M&A, debt, management change, etc.)
+- [x] Estimate historical event impact per event type (e.g. average effect at +1d/+5d/+20d)
 
-**DoD:** News/sentiment/event features generated and joinable to the daily feature table by (date, symbol), respecting actual publication timestamps.
+**DoD:** News/sentiment/event features generated and joinable to the daily feature table by (date, symbol), respecting actual publication timestamps. Met — `src/news/{ingestion,dedup,sentiment,events,impact,features}.py` (18 tests), `notebooks/06_news_sentiment.ipynb` runs the full pipeline end-to-end on real (non-fabricated) Yahoo Finance news for all 5 stocks: 12 articles survived dedup + entity-mention filtering, FinBERT scored real positive/neutral/negative probabilities, the keyword classifier tagged real event types (debt, earnings, dividend, management_change, product_launch, contract_win), and `aggregate_daily_news_features` produces a `(date, symbol)`-keyed table saved to `data/processed/news_daily_features.parquet`.
+
+Data-source limitation: Yahoo's free news feed is a small recent rolling window (~10 items/ticker, last few days), not a historical archive, so the event-impact table (`news_event_impact_summary.csv`) is a real but small-sample methodology demonstration, not a statistically reliable estimate — `mean_return_20d` is correctly `NaN` for events too recent to have 20 trading days of forward price history yet.
+
+Windows-specific bug found and fixed: `torch` (via `transformers`) fails to load (`WinError 1114`, `c10.dll`) if pandas/pyarrow are imported first in the process — pyarrow's bundled Arrow C++ runtime conflicts with torch's native DLLs. Fix: `import torch` must be the first heavy import in any process calling `load_finbert_pipeline()`; documented in `src/news/sentiment.py` and applied as the first cell of the notebook.
 
 ---
 
