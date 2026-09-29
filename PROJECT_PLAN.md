@@ -222,11 +222,34 @@ Also carried forward: `import torch` before pandas/pyarrow (Phase 6's finding) a
 
 ## Phase 14 — Scale-Out
 
-- [ ] Expand universe: 5 stocks → 50 stocks → full selected NSE universe
-- [ ] Revisit data-source licensing/redistribution terms (API terms, rate limits, commercial-use restrictions) before any commercial-facing use
-- [ ] Position/document the platform as a research/decision-support tool — no guaranteed returns/predictions/signals claims; obtain legal/regulatory advice before any SEBI-regulated personalized advice use case
+- [x] Expand universe: 5 stocks → 50 stocks → full selected NSE universe
+- [x] Revisit data-source licensing/redistribution terms (API terms, rate limits, commercial-use restrictions) before any commercial-facing use
+- [x] Position/document the platform as a research/decision-support tool — no guaranteed returns/predictions/signals claims; obtain legal/regulatory advice before any SEBI-regulated personalized advice use case
 
-**DoD:** Pipelines proven on 5 stocks now run unmodified (or with clearly isolated changes) across the expanded universe.
+**DoD:** Pipelines proven on 5 stocks now run unmodified (or with clearly isolated changes) across the expanded universe. Met.
+
+**Scope, per the user's explicit choice:** full re-run of every phase's notebook (not just config + a partial proof) on a 50-stock universe.
+
+**Universe:** `src/config.py` centralizes `UNIVERSE` — previously hardcoded independently in 6 notebooks (01, 02, 03, 04, 06, 11), now a one-line import in each (`from src.config import UNIVERSE`), which is itself the "clearly isolated change" the DoD allows — no other pipeline code changed to support scale. Chose NIFTY 50 (a principled, well-defined "~50 liquid stocks" selection, not an arbitrary pick), with every ticker individually verified to resolve on Yahoo Finance before committing to the list. Two substitutions from the textbook NIFTY 50 list, both due to real 2025 corporate actions discovered during verification: Tata Motors demerged into passenger/commercial-vehicle entities (`TATAMOTORS` no longer resolves; used `TMPV`, the passenger-vehicle successor), and `LTIM` did not resolve via this data source (substituted `DMART`).
+
+**Full re-run results — all 8 data-dependent notebooks (01, 02, 03, 04, 06, 07, 08, 09, 10, 11, 12) re-executed clean for 50 stocks, zero unhandled errors:**
+- Phase 1 (prices): 50/50 stocks, consistent 2021-09-29→2026-09-28 date range — succeeded with **zero code changes** beyond the config import, the cleanest possible proof of the DoD.
+- Phase 3 (technical): NaN-warm-up count scaled exactly (9,950 = 199×50), confirming no drift in the indicator math.
+- Phase 4 (fundamentals): 47/50 stocks (94%) got a full Fundamental Score; 3 (`NESTLEIND`, `TMPV`, `SBILIFE`) didn't, reported via a warning, not a crash.
+- Phase 5/7/8/9 (ML/multimodal/risk/backtest): results stayed consistent with the 5-stock findings — near-base-rate ROC-AUC, H6's "no edge survives costs" conclusion held.
+- Phase 12 (horizons): the 60-day long-term horizon model scored ROC-AUC 0.570 on 50 stocks (vs 0.453 on 5) — a single train/val/test split, not walk-forward-validated here, so this is reported as an interesting data point worth a proper walk-forward re-test (Phase 9-style), not evidence of a confirmed edge.
+- DB/API/dashboard: ETL reloaded all 8 tables at 50-stock scale; live API spot-check confirmed `/stocks` returns all 50 symbols and `/stocks/RELIANCE/overview` returns real data.
+
+**A confirmed external outage, handled honestly, not faked:** partway through this re-run, Yahoo Finance's news endpoint (`finance.yahoo.com/xhr/ncp`) started returning HTTP 500 for every symbol tested — including `AAPL`/`MSFT`, confirming it's a Yahoo-side outage, not specific to this project or its 50-stock scale. News/RAG results for this run reflect 0 articles across all 50 stocks; this is documented as an external, transient limitation, not silently hidden or backfilled with fabricated data.
+
+**Three real bugs found and fixed during this scale-out:**
+- **`resolve_entity_mentions` column-loss bug:** with 0 input rows (a direct consequence of the Yahoo news outage above, but the bug itself is a real, general-purpose defect, not scale-specific), the `mentions_company` column inferred as `float64` instead of `bool` (an empty Python list has no dtype to infer from), and boolean-indexing a DataFrame with a non-bool empty mask silently drops every column, not just filters rows. Fixed by explicitly constructing the column as `pd.Series(..., dtype=bool)`. Regression test added (`tests/test_news.py`).
+- **F-string escaping bug introduced while fixing the above:** a `\n` intended as an escape sequence inside an f-string (for cosmetic blank-line spacing) arrived as a literal newline byte after passing through a bash heredoc, producing a Python `SyntaxError` when the notebook cell executed. Fixed by avoiding embedded `\n` in string literals entirely (two separate `print()` calls) and verified by compiling every code cell before re-running.
+- **Phase 4 hard-assert too brittle for 50 stocks:** the original notebook asserted 100% of stocks must have a computable Fundamental Score, which would abort the entire run over a single stock's data gap. With 5 hand-picked large caps this never triggered; across 50 (including newly-demerged `TMPV`) it would have. Changed to a per-stock `try/except` around the fetch loop plus a warning report for stocks with no computable score — visible, not silent, and no longer fatal.
+
+**Licensing/positioning:** addressed in `README.md`'s new "Data licensing & commercial-use notes" and "Platform positioning" sections — none of this project's data is Tier 1 (official), everything is Yahoo-relayed or the project's own derived output, and the research/decision-support (not investment-advice) framing is consistent across the dashboard, AI Analyst, and README.
+
+**Test suite:** `src/config.py` + `tests/test_config.py` (universe validity), `src/news/dedup.py` fix + regression test — 3 new tests, 155 total.
 
 ---
 

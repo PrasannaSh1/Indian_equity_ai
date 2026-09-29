@@ -35,6 +35,20 @@ def test_resolve_entity_mentions_flags_genuine_references():
     assert out["mentions_company"].tolist() == [True, False]
 
 
+def test_resolve_entity_mentions_on_empty_input_preserves_columns_and_bool_dtype():
+    # Regression test: an empty input (e.g. no news available for any symbol
+    # today) previously produced a float64 mentions_company column, and boolean
+    # -indexing a 0-row DataFrame with a non-bool mask silently dropped every
+    # column -- found during the Phase 14 scale-out when Yahoo's news endpoint
+    # returned zero articles for all 50 symbols.
+    df = pd.DataFrame(columns=["symbol", "headline", "summary"])
+    out = resolve_entity_mentions(df)
+
+    assert out["mentions_company"].dtype == bool
+    filtered = out[out["mentions_company"]]
+    assert list(filtered.columns) == list(out.columns)  # columns must survive the filter
+
+
 # ---- event classification ---------------------------------------------------
 
 
