@@ -30,6 +30,19 @@ def test_expanding_window_folds_are_chronological_and_non_overlapping():
     assert test_end_1 < test_start_2
 
 
+def test_expanding_window_folds_embargo_shrinks_train_end():
+    dates = pd.date_range("2024-01-01", periods=20, freq="D")
+
+    no_embargo = expanding_window_folds(dates, n_folds=2, min_train_frac=0.5, embargo_days=0)
+    with_embargo = expanding_window_folds(dates, n_folds=2, min_train_frac=0.5, embargo_days=2)
+
+    train_end_no_embargo, test_start, _ = no_embargo[0]
+    train_end_with_embargo, test_start_embargo, _ = with_embargo[0]
+
+    assert test_start == test_start_embargo  # embargo only trims train, not test
+    assert train_end_with_embargo == train_end_no_embargo - pd.Timedelta(days=2)
+
+
 def test_expanding_window_folds_respects_min_train_frac():
     dates = pd.date_range("2024-01-01", periods=10, freq="D")
 

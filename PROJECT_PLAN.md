@@ -127,12 +127,16 @@ Built: `src/risk/{volatility_target,quantiles,var_es,engine}.py` (17 new tests, 
 
 ## Phase 9 — Backtesting & Validation Framework
 
-- [ ] Build a dedicated backtesting engine recording signal/entry/stop/target/exit/PnL with transaction costs and slippage
-- [ ] Implement walk-forward validation (investigate purged cross-validation / embargo)
-- [ ] Compare against NIFTY Buy & Hold; compute Sharpe, Sortino, Calmar, max drawdown, win rate, profit factor
-- [ ] Validate H6 — confirm edge survives realistic transaction costs/slippage
+- [x] Build a dedicated backtesting engine recording signal/entry/stop/target/exit/PnL with transaction costs and slippage
+- [x] Implement walk-forward validation (investigate purged cross-validation / embargo)
+- [x] Compare against NIFTY Buy & Hold; compute Sharpe, Sortino, Calmar, max drawdown, win rate, profit factor
+- [x] Validate H6 — confirm edge survives realistic transaction costs/slippage
 
-**DoD:** Research-quality backtest report comparing model-driven signals vs benchmark, net of costs.
+**DoD:** Research-quality backtest report comparing model-driven signals vs benchmark, net of costs. Met.
+
+Built: `src/backtesting/{engine,metrics}.py` (11 new tests), plus an `embargo_days` parameter added to Phase 7's `expanding_window_folds` (2 more tests, 102 total) — a 1-day-ahead target needs the last training row(s) before each fold's test window excluded, since their label depends on a price at/after the test boundary. `notebooks/09_backtesting.ipynb` runs the Phase 5-style technical classifier through 4 embargoed walk-forward folds (521 combined out-of-sample trading days, 2024-08-27 to 2026-09-24), simulates trading the signals (threshold 0.55, 15bps round-trip cost+slippage), and compares against NIFTY 50 buy & hold over the identical period.
+
+**H6 result, stated plainly: no edge survives — the strategy loses money outright, and costs make it much worse.** Cumulative return: strategy net-of-cost **‑64.9%**, strategy gross (no costs) **‑25.7%**, NIFTY 50 buy & hold **‑7.8%** (the walk-forward test window happens to span a declining market). Every risk-adjusted metric agrees: Sharpe ‑2.65 (net) vs ‑0.24 (benchmark), max drawdown ‑65% (net) vs ‑16% (benchmark). Turnover was high (~51% of symbol-days had an active position), so a strategy with no genuine edge compounds costs quickly. This is consistent with every prior phase's finding (ROC-AUC ~0.50) — H6 isn't "a small edge partially survives costs," it's "there was no edge to begin with, and acting on noise anyway is actively harmful, especially after costs." Reported plainly rather than reframed positively.
 
 ---
 
