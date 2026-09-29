@@ -28,10 +28,11 @@ torch==2.14.0
 transformers==5.17.0
 sentence-transformers==6.1.0
 
-# API / Dashboard
+# API / Dashboard / Database
 fastapi==0.115.6
 uvicorn==0.34.0
 streamlit==1.41.1
+sqlalchemy==2.1.1
 
 # Testing
 pytest==8.3.5

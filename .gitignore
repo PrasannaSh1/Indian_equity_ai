@@ -19,6 +19,9 @@ data/external/*
 !data/processed/.gitkeep
 !data/external/.gitkeep
 
+# App database (regenerated from data/processed/ via src/db/load_data.py)
+data/app.db
+
 # Models
 models/*.pkl
 models/*.joblib

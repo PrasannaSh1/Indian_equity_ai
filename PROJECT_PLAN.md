@@ -195,11 +195,26 @@ Results: swing ROC-AUC 0.505, long-term ROC-AUC 0.453 — both near base rate, c
 
 ## Phase 13 — Application & Dashboard
 
-- [ ] Build the FastAPI backend serving predictions/risk/explanations
-- [ ] Set up PostgreSQL persistence (schema: companies, securities, prices_daily, prices_intraday, financial_statements, fundamentals, ratios, corporate_actions, announcements, news, news_sentiment, news_events, macro_data, technical_features, model_predictions, backtest_results, model_versions)
-- [ ] Build the Streamlit dashboard: Overview / Technical / Fundamentals / News / Sentiment / AI Forecast / Risk / Backtest / AI Analyst tabs
+- [x] Build the FastAPI backend serving predictions/risk/explanations
+- [x] Set up PostgreSQL persistence (schema: companies, securities, prices_daily, prices_intraday, financial_statements, fundamentals, ratios, corporate_actions, announcements, news, news_sentiment, news_events, macro_data, technical_features, model_predictions, backtest_results, model_versions)
+- [x] Build the Streamlit dashboard: Overview / Technical / Fundamentals / News / Sentiment / AI Forecast / Risk / Backtest / AI Analyst tabs
 
-**DoD:** End-to-end flow works — search a stock in the dashboard, see a live consolidated analysis backed by the pipelines from Phases 1–12.
+**DoD:** End-to-end flow works — search a stock in the dashboard, see a live consolidated analysis backed by the pipelines from Phases 1–12. Met — verified live in a real browser (screenshots + full-page text extraction), not just unit tests: searched HDFCBANK, saw a real AI Outlook (Bullish, 62.5% P(up)), a real Risk label (Medium, 44/100), and a real cited AI Analyst answer to "What are the strongest fundamental factors?" that correctly surfaced the fundamentals document first.
+
+**Key decision (asked the user):** PostgreSQL 14 is installed on this machine but wasn't running as a service, with no `psycopg2`/`sqlalchemy` set up. Standing up a live Postgres service is a bigger infrastructure step than this phase needs. Per the user's choice, persistence is **SQLite via SQLAlchemy Core** — same relational schema, no service to manage, and portable to Postgres later (swap the connection URL; no column types used are SQLite-specific).
+
+Built:
+- `src/db/{schema,load_data}.py` — 8-table schema (a real subset of Section 7, restricted to data this project actually collected — no empty placeholder tables for `prices_intraday`/`corporate_actions` etc.) and an ETL loader from `data/processed/*` into `data/app.db`
+- `src/api/main.py` — FastAPI backend, 10 endpoints (`/stocks`, `/stocks/{symbol}/{overview,technical,fundamentals,news,forecast,risk,explanation,entry-exit}`, `/backtest`, `/ai-analyst/ask`), dependency-injected DB engine + RAG index (`Depends()`, not a bare global) so tests can override both without touching the real DB or loading the real embedding model
+- `app/{api_client,dashboard}.py` — a thin, unit-tested HTTP client and the Streamlit dashboard (9 tabs matching Section 34's mockup), presentation-only with no model/DB logic of its own
+
+14 new tests across `db`/`api`/`api_client` (142 total).
+
+Two real bugs found and fixed while wiring this together:
+- **SQLite in-memory test isolation:** FastAPI runs sync route handlers in a threadpool, and plain `sqlite:///:memory:` gives each new connection its own empty database — tests intermittently saw "no such table" errors. Fixed with `StaticPool` (the standard SQLAlchemy pattern for sharing one in-memory DB across connections), applied to both the API and ETL test fixtures.
+- **NaN breaks JSON serialization:** the `/backtest` endpoint 500'd in the live browser test (caught by actually using the app, not just unit tests) — Starlette's `JSONResponse` uses `allow_nan=False`, and `backtest_results` legitimately has `NaN` for metrics that don't apply to a pure buy-and-hold benchmark (win_rate, profit_factor). First fix attempt (`df.where(cond, None)`) silently failed because assigning `None` into a `float64` column just coerces back to `NaN` — pandas can't hold `None` in a fixed-float-dtype column. Real fix: sanitize NaN→None on the plain Python dicts *after* `to_dict()`, not on the DataFrame.
+
+Also carried forward: `import torch` before pandas/pyarrow (Phase 6's finding) applies process-wide, not per-file — pytest runs all test modules in one process, so relying on individual files to each import torch first only works by alphabetical luck. Fixed properly with a root `tests/conftest.py` that imports torch before pytest collects anything.
 
 ---
 
