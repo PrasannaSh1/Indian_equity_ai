@@ -180,10 +180,16 @@ Retrieval worked well without any hardcoded query-intent routing — pure semant
 
 ## Phase 12 — Entry/Exit Engine & Investor Horizons
 
-- [ ] Split modeling by horizon: intraday, swing/short-term, long-term — separate feature sets/models per horizon
-- [ ] Build the entry/exit decision-support layer (entry zone, stop zone, target zone, risk label) — clearly labeled as hypothetical model-generated levels, not guarantees
+- [x] Split modeling by horizon: intraday, swing/short-term, long-term — separate feature sets/models per horizon
+- [x] Build the entry/exit decision-support layer (entry zone, stop zone, target zone, risk label) — clearly labeled as hypothetical model-generated levels, not guarantees
 
-**DoD:** Horizon-specific outputs and entry/exit suggestions available for at least the swing/short-term horizon.
+**DoD:** Horizon-specific outputs and entry/exit suggestions available for at least the swing/short-term horizon. Met.
+
+**Intraday is honestly out of scope**: this project only has daily EOD data (Phase 1); Section 26's intraday feature list (1/5/15-minute bars) needs a different, likely paid, real-time/historical data source, not something to fabricate.
+
+Built: `src/models/horizons.py` (generalizes Phase 5's `add_target` to any forward horizon, same NaN-safety fix), `src/entryexit/engine.py` (rule-based entry/stop/target zones from ATR + probability, long-only, consistent with Phase 9's backtest convention) — 6 new tests, 128 total. `notebooks/12_horizons_and_entry_exit.ipynb` builds two genuinely different horizons: **swing/short-term** (5-day forward direction, technical features) and **long-term** (60-day forward direction, point-in-time fundamentals via Phase 7's `merge_fundamentals_pit`) — "do not use the same model for every investment horizon" (Section 26) is satisfied with real, differently-sourced features, not just a relabeled copy.
+
+Results: swing ROC-AUC 0.505, long-term ROC-AUC 0.453 — both near base rate, consistent with every prior phase's finding. This doesn't confirm H2 (fundamentals matter more long-term) here, but is reported plainly as inconclusive-with-current-data rather than reframed positively — Phase 4/7's known fundamentals coverage gaps (only ~5 fiscal years, coarse point-in-time granularity) are the more likely explanation than "fundamentals don't matter." Entry/exit zones (1.5×ATR stop, 2:1 reward:risk target) compute correctly and sanely (stop below close, target above, entry zone tight around close) on the swing model's signals — a presentation/risk-management layer on top of existing forecasts, not a new source of edge.
 
 ---
 
