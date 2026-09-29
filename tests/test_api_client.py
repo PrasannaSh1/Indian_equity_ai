@@ -20,7 +20,7 @@ def test_overview_requests_the_correct_url_and_returns_json():
     with patch("app.api_client.requests.get", return_value=_mock_response({"close": 100.0})) as mock_get:
         result = client.overview("RELIANCE")
 
-    mock_get.assert_called_once_with("http://testserver/stocks/RELIANCE/overview", timeout=15)
+    mock_get.assert_called_once_with("http://testserver/stocks/RELIANCE/overview", params=None, timeout=15)
     assert result == {"close": 100.0}
 
 
@@ -42,7 +42,7 @@ def test_base_url_trailing_slash_is_stripped():
     with patch("app.api_client.requests.get", return_value=_mock_response([])) as mock_get:
         client.list_stocks()
 
-    mock_get.assert_called_once_with("http://testserver/stocks", timeout=15)
+    mock_get.assert_called_once_with("http://testserver/stocks", params=None, timeout=15)
 
 
 def test_http_error_status_propagates():
@@ -50,3 +50,14 @@ def test_http_error_status_propagates():
     with patch("app.api_client.requests.get", return_value=_mock_response({}, status_code=404)):
         with pytest.raises(requests.HTTPError):
             client.overview("UNKNOWN")
+
+
+def test_history_passes_days_as_a_query_param():
+    client = ApiClient(base_url="http://testserver")
+    with patch("app.api_client.requests.get", return_value=_mock_response([{"close": 1.0}])) as mock_get:
+        result = client.history("RELIANCE", days=90)
+
+    mock_get.assert_called_once_with(
+        "http://testserver/stocks/RELIANCE/history", params={"days": 90}, timeout=15
+    )
+    assert result == [{"close": 1.0}]

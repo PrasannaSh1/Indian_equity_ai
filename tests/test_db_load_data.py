@@ -53,8 +53,10 @@ def _write_minimal_fixtures(tmp_path):
     prices.to_parquet(tmp_path / "prices_daily.parquet", index=False)
 
     technical_cols = [
-        "date", "symbol", "close", "sma_20", "sma_50", "sma_200", "rsi_14",
-        "macd", "macd_signal", "macd_histogram", "atr_14", "bb_width", "volume_ratio", "technical_score",
+        "date", "symbol", "open", "high", "low", "close", "volume",
+        "sma_20", "sma_50", "sma_200", "ema_20", "ema_50", "rsi_14",
+        "macd", "macd_signal", "macd_histogram", "atr_14",
+        "bb_upper", "bb_middle", "bb_lower", "bb_width", "volume_ratio", "technical_score",
     ]
     technical = pd.DataFrame([[pd.Timestamp("2024-01-01"), "A"] + [1.0] * (len(technical_cols) - 2)], columns=technical_cols)
     technical.to_parquet(tmp_path / "technical_features.parquet", index=False)

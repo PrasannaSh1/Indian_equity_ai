@@ -24,6 +24,9 @@ class ApiClient:
     def technical(self, symbol: str) -> dict:
         return self._get(f"/stocks/{symbol}/technical")
 
+    def history(self, symbol: str, days: int = 180) -> list[dict]:
+        return self._get(f"/stocks/{symbol}/history", params={"days": days})
+
     def fundamentals(self, symbol: str) -> dict:
         return self._get(f"/stocks/{symbol}/fundamentals")
 
@@ -48,8 +51,8 @@ class ApiClient:
     def ask(self, symbol: str, query: str) -> dict:
         return self._post("/ai-analyst/ask", {"symbol": symbol, "query": query})
 
-    def _get(self, path: str):
-        response = requests.get(f"{self.base_url}{path}", timeout=DEFAULT_TIMEOUT)
+    def _get(self, path: str, params: dict | None = None):
+        response = requests.get(f"{self.base_url}{path}", params=params, timeout=DEFAULT_TIMEOUT)
         response.raise_for_status()
         return response.json()
 

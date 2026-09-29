@@ -145,6 +145,22 @@ def technical(symbol: str, engine=Depends(get_db_engine)):
     return _latest_row(engine, symbol, "technical_features")
 
 
+@app.get("/stocks/{symbol}/history")
+def history(symbol: str, days: int = 180, engine=Depends(get_db_engine)):
+    """OHLCV + indicator time series for charting. `days` counts trading days
+    (rows), not calendar days -- this project only has daily EOD data, not
+    intraday/streaming prices (see PROJECT_PLAN.md Phase 12's intraday note).
+    """
+    df = _query_df(
+        engine,
+        "SELECT * FROM technical_features WHERE symbol = :symbol ORDER BY date DESC LIMIT :days",
+        {"symbol": symbol, "days": days},
+    )
+    if df.empty:
+        raise HTTPException(status_code=404, detail=f"No history for symbol '{symbol}'")
+    return _json_safe_records(df.sort_values("date"))
+
+
 @app.get("/stocks/{symbol}/fundamentals")
 def fundamentals(symbol: str, engine=Depends(get_db_engine)):
     df = _query_df(engine, "SELECT * FROM fundamentals_snapshot WHERE symbol = :symbol", {"symbol": symbol})

@@ -36,6 +36,22 @@ def client():
     )
     prices.to_sql("prices_daily", engine, if_exists="append", index=False)
 
+    technical = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"]),
+            "symbol": ["RELIANCE"] * 3,
+            "open": [100.0, 101.0, 102.0], "high": [102.0, 103.0, 104.0], "low": [99.0, 100.0, 101.0],
+            "close": [101.0, 102.0, 103.0], "volume": [1000.0, 1100.0, 1200.0],
+            "sma_20": [100.0, 101.0, 102.0], "sma_50": [None, None, None], "sma_200": [None, None, None],
+            "ema_20": [100.0, 101.0, 102.0], "ema_50": [100.0, 101.0, 102.0],
+            "rsi_14": [50.0, 55.0, 60.0], "macd": [0.1, 0.2, 0.3], "macd_signal": [0.1, 0.1, 0.2],
+            "macd_histogram": [0.0, 0.1, 0.1], "atr_14": [2.0, 2.1, 2.2],
+            "bb_upper": [105.0, 106.0, 107.0], "bb_middle": [100.0, 101.0, 102.0], "bb_lower": [95.0, 96.0, 97.0],
+            "bb_width": [0.1, 0.1, 0.1], "volume_ratio": [1.0, 1.1, 1.2], "technical_score": [50.0, 55.0, 60.0],
+        }
+    )
+    technical.to_sql("technical_features", engine, if_exists="append", index=False)
+
     predictions = pd.DataFrame(
         {
             "date": pd.to_datetime(["2024-01-02"]), "symbol": ["RELIANCE"], "close": [102.0],
@@ -114,6 +130,23 @@ def test_forecast_and_risk_endpoints(client):
 
     risk = client.get("/stocks/RELIANCE/risk").json()
     assert risk == {"risk_score": 45.0, "risk_label": "Medium"}
+
+
+def test_history_endpoint_returns_ascending_dates_and_respects_days_limit(client):
+    resp = client.get("/stocks/RELIANCE/history", params={"days": 2})
+    assert resp.status_code == 200
+    rows = resp.json()
+
+    assert len(rows) == 2  # limited to the 2 most recent rows...
+    dates = [r["date"] for r in rows]
+    assert dates == sorted(dates)  # ...but returned oldest-to-newest for charting
+    assert rows[-1]["close"] == pytest.approx(103.0)  # the most recent row
+
+
+def test_history_endpoint_serializes_nan_sma_as_null(client):
+    resp = client.get("/stocks/RELIANCE/history", params={"days": 10})
+    rows = resp.json()
+    assert rows[0]["sma_50"] is None
 
 
 def test_fundamentals_endpoint(client):

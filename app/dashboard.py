@@ -19,6 +19,7 @@ import requests
 import streamlit as st
 
 from app.api_client import ApiClient
+from app.charts import OSCILLATOR_OPTIONS, OVERLAY_OPTIONS, build_price_chart
 
 st.set_page_config(page_title="Indian Equity AI Analyst", layout="wide")
 
@@ -70,8 +71,28 @@ tabs = st.tabs(
 
 with tabs[0]:
     st.subheader("Overview")
+    st.caption(
+        "Daily EOD price chart (this project's data is end-of-day, not streaming intraday ticks) "
+        "with optional indicator overlays."
+    )
+
+    chart_cols = st.columns(2)
+    selected_overlays = chart_cols[0].multiselect("Overlay indicators", OVERLAY_OPTIONS, default=["SMA 50"])
+    selected_oscillators = chart_cols[1].multiselect("Oscillator panels", OSCILLATOR_OPTIONS)
+    lookback_days = st.slider("Lookback (trading days)", min_value=30, max_value=500, value=180, step=10)
+
+    history, hist_err = safe_call(client.history, symbol, days=lookback_days)
+    if history:
+        history_df = pd.DataFrame(history)
+        history_df["date"] = pd.to_datetime(history_df["date"])
+        fig = build_price_chart(history_df, overlays=selected_overlays, oscillators=selected_oscillators)
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning(hist_err or "No price history available for this symbol.")
+
     if overview:
-        st.json(overview)
+        with st.expander("Raw overview data"):
+            st.json(overview)
     else:
         st.warning("No overview data available for this symbol.")
 

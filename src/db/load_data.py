@@ -21,8 +21,10 @@ def load_prices_daily(engine, data_processed: Path) -> int:
 def load_technical_features(engine, data_processed: Path) -> int:
     df = pd.read_parquet(data_processed / "technical_features.parquet")
     cols = [
-        "date", "symbol", "close", "sma_20", "sma_50", "sma_200", "rsi_14",
-        "macd", "macd_signal", "macd_histogram", "atr_14", "bb_width",
+        "date", "symbol", "open", "high", "low", "close", "volume",
+        "sma_20", "sma_50", "sma_200", "ema_20", "ema_50", "rsi_14",
+        "macd", "macd_signal", "macd_histogram", "atr_14",
+        "bb_upper", "bb_middle", "bb_lower", "bb_width",
         "volume_ratio", "technical_score",
     ]
     df = df[cols]
