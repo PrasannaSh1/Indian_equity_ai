@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.models.dataset import add_target, chronological_split
+from src.models.dataset import add_next_day_return, add_target, chronological_split
 
 
 def _minimal_technical_df(symbol, closes, start="2024-01-01"):
@@ -51,6 +51,15 @@ def test_add_target_does_not_leak_across_symbols():
     b_last = out[out["symbol"] == "B"].iloc[-1]
     assert pd.isna(a_last["next_day_direction"])
     assert pd.isna(b_last["next_day_direction"])
+
+
+def test_add_next_day_return_matches_hand_computed_pct_change():
+    df = _minimal_technical_df("A", [100, 110, 99])
+    out = add_next_day_return(df)
+
+    assert out["next_day_return"].iloc[0] == pytest.approx(0.10)
+    assert out["next_day_return"].iloc[1] == pytest.approx(-0.10)
+    assert pd.isna(out["next_day_return"].iloc[2])
 
 
 def test_chronological_split_has_no_date_overlap_and_correct_order():

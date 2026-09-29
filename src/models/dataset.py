@@ -77,6 +77,19 @@ def add_target(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def add_next_day_return(df: pd.DataFrame) -> pd.DataFrame:
+    """Adds next_day_return: tomorrow's close-to-close percent return, continuous
+    (the regression counterpart of next_day_direction). The last row of each
+    symbol has no "tomorrow" and is left as NaN via shift(-1), which already
+    produces NaN rather than a fabricated value -- no comparison-with-NaN pitfall
+    here since this is arithmetic, not a boolean cast.
+    """
+    df = df.sort_values(["symbol", "date"]).copy()
+    next_close = df.groupby("symbol")["close"].shift(-1)
+    df["next_day_return"] = next_close / df["close"] - 1
+    return df
+
+
 def build_ml_dataset(technical_df: pd.DataFrame) -> pd.DataFrame:
     """Full Phase 5 dataset: features + target, with warm-up/undefined rows dropped."""
     df = build_feature_table(technical_df)

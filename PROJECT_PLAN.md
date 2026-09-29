@@ -109,11 +109,19 @@ Real bug found and fixed during this phase: the initial `FUNDAMENTAL_FEATURE_COL
 
 ## Phase 8 — Volatility, Probabilistic Forecasting & Risk Engine
 
-- [ ] Build a separate volatility model
-- [ ] Extend direction predictions to probabilistic quantile forecasts (10th/50th/90th percentile range)
-- [ ] Build the Risk Engine: expected return, probability, expected volatility, max drawdown, beta, liquidity, VaR, Expected Shortfall → Low/Medium/High risk label
+- [x] Build a separate volatility model
+- [x] Extend direction predictions to probabilistic quantile forecasts (10th/50th/90th percentile range)
+- [x] Build the Risk Engine: expected return, probability, expected volatility, max drawdown, beta, liquidity, VaR, Expected Shortfall → Low/Medium/High risk label
 
-**DoD:** Every prediction ships with a probability, a range, and a risk label — not just a point estimate.
+**DoD:** Every prediction ships with a probability, a range, and a risk label — not just a point estimate. Met — every row of `data/processed/risk_engine_output.parquet` has `probability_up`, a `price_q10`/`price_q50`/`price_q90` range, and a `risk_label`.
+
+Built: `src/risk/{volatility_target,quantiles,var_es,engine}.py` (17 new tests, 90 total) — forward realized-volatility labeling (hand-verified window alignment), LightGBM quantile regression with monotonicity enforcement (independently trained quantile models aren't guaranteed non-crossing), historical VaR/Expected Shortfall, and a composite 0–100 risk score. `notebooks/08_risk_engine.ipynb` wires these together with Phase 2's beta/max-drawdown and Phase 5's classifier.
+
+**Two honest calibration findings, not glossed over:**
+- The volatility model's MAE came out statistically indistinguishable from a naive "assume the training-set average volatility continues" forecast — it isn't yet demonstrably adding value.
+- The quantile price range's empirical 10–90 coverage was ~64% against an ~80% target — the range is currently too narrow and should be read as relative-uncertainty guidance, not a literal confidence interval, until recalibrated.
+
+**Bug found and fixed:** the risk label initially came out 100% "Medium" for every test row — `compute_risk_score`'s absolute 0–100 caps (5% daily vol, beta=2, 60% drawdown, 5% VaR) were calibrated for a broader, more volatile universe than these 5 large-cap blue chips, so no row ever reached the Low/High ends. Fixed by adding `risk_label_relative`, which buckets using tertile cutoffs learned from the training split's score distribution (not test, avoiding leakage) — now spans all three labels sensibly (e.g. RELIANCE/HDFCBANK skew Low/Medium given shallower historical drawdowns; INFY/TCS skew High given steeper ones).
 
 ---
 
