@@ -142,10 +142,16 @@ Built: `src/backtesting/{engine,metrics}.py` (11 new tests), plus an `embargo_da
 
 ## Phase 10 — Explainable AI
 
-- [ ] Add SHAP-based per-prediction explanations (top positive/negative factors)
-- [ ] Surface confidence/uncertainty alongside every prediction
+- [x] Add SHAP-based per-prediction explanations (top positive/negative factors)
+- [x] Surface confidence/uncertainty alongside every prediction
 
-**DoD:** System can answer "why did the model make this prediction?" for any given stock/day with a factor breakdown.
+**DoD:** System can answer "why did the model make this prediction?" for any given stock/day with a factor breakdown. Met.
+
+Built: `src/explainability/{shap_explainer,confidence}.py` (7 new tests, 107 total). `notebooks/10_explainability.ipynb` explains every test-set prediction (785 rows) with top-4 positive/negative SHAP factors plus a confidence score (0=coin flip, 1=certain).
+
+Important unit note, verified by test not just asserted: SHAP values from `TreeExplainer` are in **log-odds (margin) units**, not probability points (`sigmoid(sum(shap_values) + expected_value) == predict_proba`) — factor contributions are reported and labeled as such rather than mislabeled as percentage points for a nicer-looking display.
+
+Confidence distribution came out fairly balanced (257 Low / 299 Medium / 229 High out of 785) — not overwhelmingly skewed toward "unsure" despite the near-0.50 ROC-AUC found in every prior phase. That's expected, not a contradiction: confidence measures how strongly the model leans, not whether the lean is correct. Cross-check: the top global SHAP features (`price_to_sma200`, `return_5d`, `volatility_60d`, `atr_pct`, `price_to_sma50`) substantially overlap with Phase 5's tree-split-based importances — two independent importance measures broadly agreeing is a reassuring pipeline-consistency signal.
 
 ---
 
