@@ -11,8 +11,10 @@ price/technical/fundamental/news/macro data feeding probabilistic, explainable p
 served through a FastAPI backend and Streamlit dashboard with an AI Analyst.
 **What this is not:** a guaranteed-returns system or investment advice.
 
-**Status:** All 14 planned phases complete. Universe: 50 stocks (NIFTY 50), configured in
-`src/config.py`. Test suite: 155/155 passing.
+**Status:** All 14 planned phases complete, plus an in-progress generalization effort (Phases
+15–26) moving the platform from "50 fixed stocks" to "train globally on the 50-stock universe,
+infer live on any supported NSE company" — see below. Universe: 50 stocks (NIFTY 50), configured
+in `src/config.py`. Test suite: 191/191 passing.
 
 ---
 
@@ -30,6 +32,12 @@ outputs should be read against.
 One partial exception: Phase 12's 60-day long-term horizon model scored ROC-AUC 0.570 on the
 50-stock universe (vs 0.453 on 5) — a single train/val/test split, **not yet walk-forward
 validated**. Worth re-testing properly (Phase 9-style) before treating it as a real signal.
+
+The held-out-company generalization test (Phase 22, below) reinforces the same finding from a
+different angle: companies the model never saw during training (ROC-AUC 0.525) perform
+statistically the same as companies it did see (0.512) — both near coin-flip. That is itself a
+consistency check that the architecture works technically (no crash, no leakage, no degenerate
+output), not evidence of a real edge in either direction.
 
 ---
 
@@ -52,6 +60,51 @@ validated**. Worth re-testing properly (Phase 9-style) before treating it as a r
 | 12 | Entry/Exit & Horizons | `src/models/horizons.py`, `src/entryexit/engine.py` | Swing (5d) + long-term (60d) horizons; rule-based entry/stop/target zones |
 | 13 | Application & Dashboard | `src/db/*`, `src/api/main.py`, `app/*` | FastAPI + SQLite + Streamlit (9 tabs), verified live in browser |
 | 14 | Scale-Out | `src/config.py` | 5→50 stocks (NIFTY 50), full pipeline re-run, zero code drift |
+| 15 | Security Resolver | `src/security/resolver.py` | Ticker/`.NS`/`.BO`/company-name → canonical symbol; distinguishes training-universe vs any-NSE-company |
+| 18 | Data Sufficiency Gate | `src/data_quality/eligibility.py` | Refuses ML inference (`INSUFFICIENT_DATA`) rather than feeding a partial feature row |
+| 21 | Global Model Persistence | `src/models/{train_global,registry,predict}.py` | First-ever **persisted** model artifact (previously notebook-only); XGBoost won validation, test ROC-AUC 0.507 |
+| 22 | Held-Out-Company Test | `src/models/evaluate_holdout_companies.py` | 40/10 ticker split; unseen-company ROC-AUC 0.525 vs seen-company 0.512 — see finding above |
+| 26 | Live Orchestrator | `src/services/company_analysis.py` | `analyze_company()`: resolve → fetch → features → global model → risk/entry-exit/SHAP → fundamentals/news/RAG, for any company |
+| 28 | API Extension | `src/api/main.py` | `POST /analysis`, `GET /company/{id}/resolve` — additive, no existing route changed |
+| 29 | Dashboard Extension | `app/dashboard.py` | New "Analyze Any Company" tab (free-text search) alongside the existing 50-stock dropdown |
+
+---
+
+## Generalization: train globally, infer locally
+
+Phases 0–14 built a batch pipeline over a fixed 50-stock universe with no persisted model and no
+live inference path — the FastAPI app (Phase 13) only ever read precomputed DB rows. Phases
+15–26 close that gap without touching any of Phases 0–14's working code:
+
+- `src/models/train_global.py` fits the same candidate models notebook 05 always did, but now
+  actually **persists** the winner (`joblib`) plus a registry entry (`src/models/registry.py`,
+  a JSON log, not a DB table — training is offline/batch, decoupled from the app's SQLite DB).
+- `src/security/resolver.py` resolves a ticker, `.NS`/`.BO`-suffixed ticker, or company name to
+  a canonical symbol, and flags whether it's in the training universe — not being in it is not a
+  resolution failure (Analysis Universe ⊇ Training Universe).
+- `src/data_quality/eligibility.py` gates inference on real feature-completeness (SMA-200's
+  ~260-trading-day warm-up), returning `INSUFFICIENT_DATA` honestly rather than feeding the
+  model a partial row.
+- `src/services/company_analysis.py::analyze_company()` is the live orchestrator: resolve →
+  fetch (on demand, any symbol) → the *same* `build_feature_table`/`build_latest_features`
+  transform training used → the persisted global model → risk/entry-exit/SHAP → best-effort
+  fundamentals/news/RAG (each independently wrapped, degrading to `"available": false` with a
+  reason on failure, never fabricating a result). **The model is never retrained per request.**
+- Verified end-to-end for both a training-universe company (TCS) and a deliberately-excluded one
+  (DIXON Technologies) — both flow through identical code, differing only in the
+  `training_universe_member` flag the response carries.
+- One real bug found by actually running this against live data (see bug log below): yfinance's
+  `period="5y"` pull can include a trailing row for the still-open trading session — real
+  `open`/`volume` but `NaN` close. Filtered out in the live-fetch path, not imputed.
+- `src/api/main.py` gained `POST /analysis` and `GET /company/{id}/resolve` (additive); the
+  dashboard gained an "Analyze Any Company" tab (additive) alongside the existing 9 precomputed
+  tabs. All 155 original tests plus 36 new ones (resolver, eligibility, registry, predict,
+  train_global, holdout-generalization, orchestrator, API, dashboard client) pass — 191 total.
+
+Not yet built (tracked, not started): sector-aware fundamental sub-scoring beyond the existing
+bank-NaN handling, a persistent cache layer for repeated live lookups, and wiring a second
+production model version through the registry to exercise `feature_schema_version` mismatch
+handling for real (currently only unit-tested with a synthetic stale version).
 
 ---
 
@@ -127,6 +180,11 @@ this project's practice of verifying before declaring a phase done.
     sequence was intended, causing a `SyntaxError` (Phase 14).
 13. **Phase 4's hard assert too brittle for 50 stocks**: would abort the whole run over one
     stock's data gap; changed to per-stock `try/except` + visible warning (Phase 14).
+14. **Trailing NaN-close row from live yfinance pulls**: a live `period="5y"` download can
+    include today's still-open session — real `open`/`volume`, `NaN` close — which silently
+    NaN'd every downstream technical feature for the "latest" row. Found by actually running the
+    new live orchestrator against real data, not from a unit test; fixed by dropping rows with
+    no close before computing indicators (Phase 26).
 
 ---
 
@@ -142,19 +200,22 @@ Plotly, pytest. Full list in `requirements.txt`.
   authoritative, executed record of that phase's results.
 - **Reusable pipeline code:** `src/` (mirrors the phase structure: `ingestion`, `features`,
   `technical`, `fundamentals`, `models`, `news`, `macro`, `regime`, `risk`, `backtesting`,
-  `explainability`, `rag`, `entryexit`, `db`, `api`).
+  `explainability`, `rag`, `entryexit`, `db`, `api`), plus the generalization additions
+  `security` (resolver), `data_quality` (eligibility), and `services` (live orchestrator).
 - **App:** `src/api/main.py` (FastAPI) + `app/dashboard.py` (Streamlit) + `app/{api_client,charts}.py`.
-- **Tests:** `tests/`, 155 passing — hand-computed or analytically-derived reference values
+- **Tests:** `tests/`, 191 passing — hand-computed or analytically-derived reference values
   throughout, not just "does it run" checks.
-- **Data:** `data/processed/*` (parquet/CSV, regenerated by the notebooks) and `data/app.db`
-  (SQLite, regenerated by `python -m src.db.load_data`) — both gitignored, not committed.
+- **Data:** `data/processed/*` (parquet/CSV, regenerated by the notebooks), `data/models/*`
+  (persisted global model + `registry.json`, regenerated by `train_global.py`), and `data/app.db`
+  (SQLite, regenerated by `python -m src.db.load_data`) — all gitignored, not committed.
 
 ## Running it
 
 ```bash
 venv\Scripts\activate
 pip install -r requirements.txt
-pytest                                    # 155 tests
+pytest                                    # 191 tests
+python -m src.models.train_global         # persist the global model to data/models/
 python -m src.db.load_data                # populate data/app.db from data/processed/
 uvicorn src.api.main:app --reload         # API on :8000
 streamlit run app/dashboard.py            # dashboard on :8501

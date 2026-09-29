@@ -22,6 +22,10 @@ data/external/*
 # App database (regenerated from data/processed/ via src/db/load_data.py)
 data/app.db
 
+# Persisted global model + registry (regenerated via src/models/train_global.py)
+data/models/*
+!data/models/.gitkeep
+
 # Models
 models/*.pkl
 models/*.joblib

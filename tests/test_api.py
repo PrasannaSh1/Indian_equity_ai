@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
+import src.api.main as api_main
 from src.api.main import app, get_db_engine, get_rag_index
 from src.db.schema import create_all_tables
 from src.rag.retrieval import VectorIndex
@@ -170,3 +171,58 @@ def test_ai_analyst_ask_returns_a_grounded_cited_answer(client):
     body = resp.json()
     assert "Reliance is doing fine" in body["answer"]
     assert body["sources"][0]["doc_id"] == "d1"
+
+
+def test_resolve_company_endpoint_known_ticker():
+    client = TestClient(app)
+    resp = client.get("/company/TCS/resolve")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["symbol"] == "TCS"
+    assert body["in_training_universe"] is True
+
+
+def test_resolve_company_endpoint_unseen_ticker():
+    client = TestClient(app)
+    resp = client.get("/company/DIXON/resolve")
+    assert resp.status_code == 200
+    assert resp.json()["in_training_universe"] is False
+
+
+def test_resolve_company_endpoint_422s_for_empty_identifier():
+    client = TestClient(app)
+    resp = client.get("/company/%20/resolve")
+    assert resp.status_code == 422
+
+
+def test_analysis_endpoint_runs_the_live_pipeline(monkeypatch):
+    """Phase 26: the orchestration internals are covered by
+    tests/services/test_company_analysis.py -- this only checks that the FastAPI
+    route wires the request through to analyze_company() and returns its result.
+    """
+    fake_result = {"company": {"symbol": "TCS"}, "model_coverage": {"in_training_universe": True}}
+    monkeypatch.setattr(
+        api_main,
+        "analyze_company",
+        lambda company, horizon="5d", analysis_type="full": fake_result,
+    )
+
+    client = TestClient(app)
+    resp = client.post("/analysis", json={"company": "TCS", "horizon": "5d", "analysis_type": "quick"})
+
+    assert resp.status_code == 200
+    assert resp.json() == fake_result
+
+
+def test_analysis_endpoint_returns_422_for_unresolvable_company(monkeypatch):
+    def raise_not_resolved(company, horizon="5d", analysis_type="full"):
+        from src.security.resolver import CompanyNotResolvedError
+
+        raise CompanyNotResolvedError("nope")
+
+    monkeypatch.setattr(api_main, "analyze_company", raise_not_resolved)
+
+    client = TestClient(app)
+    resp = client.post("/analysis", json={"company": "###"})
+
+    assert resp.status_code == 422

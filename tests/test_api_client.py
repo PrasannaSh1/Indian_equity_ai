@@ -61,3 +61,25 @@ def test_history_passes_days_as_a_query_param():
         "http://testserver/stocks/RELIANCE/history", params={"days": 90}, timeout=15
     )
     assert result == [{"close": 1.0}]
+
+
+def test_analyze_posts_company_horizon_and_analysis_type():
+    client = ApiClient(base_url="http://testserver")
+    with patch("app.api_client.requests.post", return_value=_mock_response({"company": {}})) as mock_post:
+        result = client.analyze("DIXON", horizon="60d", analysis_type="quick")
+
+    mock_post.assert_called_once_with(
+        "http://testserver/analysis",
+        json={"company": "DIXON", "horizon": "60d", "analysis_type": "quick"},
+        timeout=15,
+    )
+    assert result == {"company": {}}
+
+
+def test_resolve_company_requests_the_correct_url():
+    client = ApiClient(base_url="http://testserver")
+    with patch("app.api_client.requests.get", return_value=_mock_response({"symbol": "TCS"})) as mock_get:
+        result = client.resolve_company("TCS")
+
+    mock_get.assert_called_once_with("http://testserver/company/TCS/resolve", params=None, timeout=15)
+    assert result == {"symbol": "TCS"}

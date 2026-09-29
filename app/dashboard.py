@@ -66,7 +66,10 @@ if overview:
         col3.metric("Risk", forecast["risk_label"], f"{forecast['risk_score']:.0f}/100")
 
 tabs = st.tabs(
-    ["Overview", "Technical", "Fundamentals", "News", "Sentiment", "AI Forecast", "Risk", "Backtest", "AI Analyst"]
+    [
+        "Overview", "Technical", "Fundamentals", "News", "Sentiment", "AI Forecast", "Risk",
+        "Backtest", "AI Analyst", "Analyze Any Company",
+    ]
 )
 
 with tabs[0]:
@@ -196,3 +199,61 @@ with tabs[8]:
             st.write(result["answer"])
         else:
             st.error(err or "Could not get an answer.")
+
+with tabs[9]:
+    st.subheader("Analyze Any Company")
+    st.caption(
+        "Type any NSE-listed ticker or company name -- not just the precomputed 50-stock "
+        "universe used by the other tabs above. This runs the live pipeline on demand: "
+        "fetches fresh data, computes the same features training used, and applies the "
+        "already-trained global model without retraining it (\"train globally, infer "
+        "locally\"). It is slower than the other tabs since nothing here is precomputed."
+    )
+    query_col, horizon_col, depth_col = st.columns([3, 1, 1])
+    company_query = query_col.text_input(
+        "Company ticker or name", placeholder="e.g. TCS, Dixon Technologies, RELIANCE"
+    )
+    horizon_choice = horizon_col.selectbox("Horizon", ["5d", "60d"], format_func=lambda h: f"{h} swing" if h == "5d" else f"{h} long-term")
+    quick_mode = depth_col.checkbox("Quick mode", value=True, help="Skips fundamentals/news/RAG for a faster result.")
+
+    if st.button("Analyze") and company_query:
+        with st.spinner(f"Running the live pipeline for '{company_query}'..."):
+            result, err = safe_call(
+                client.analyze, company_query, horizon_choice, "quick" if quick_mode else "full"
+            )
+        if err:
+            st.error(err)
+        elif result:
+            company_info = result["company"]
+            coverage = result["model_coverage"]
+            st.markdown(f"### {company_info.get('name') or company_info['symbol']} ({company_info['symbol']})")
+            if coverage["in_training_universe"]:
+                st.success("In the global model's training universe.")
+            else:
+                st.warning(coverage["note"])
+
+            dq = result["data_quality"]
+            st.caption(f"Data quality: {dq['history_years']} years of history, ML eligible: {dq['ml_eligible']}")
+
+            prediction = result["prediction"]
+            if prediction.get("available"):
+                cols = st.columns(3)
+                direction = "Bullish" if prediction["probability_up"] > 0.5 else "Bearish"
+                cols[0].metric("AI Outlook", direction, f"{prediction['probability_up']:.1%} P(up)")
+                cols[1].metric("Confidence", prediction["confidence_label"], f"{prediction['confidence']:.2f}")
+                risk = result["risk"]
+                if risk.get("available"):
+                    cols[2].metric("Risk", risk["risk_label"], f"{risk['risk_score']:.0f}/100")
+
+                entry_exit = result["entry_exit"]
+                if entry_exit.get("available") and entry_exit.get("has_signal"):
+                    st.markdown("**Entry/Exit (hypothetical, not guaranteed):**")
+                    st.write(f"Entry Zone: Rs{entry_exit['entry_low']:.2f} — Rs{entry_exit['entry_high']:.2f}")
+                    st.write(f"Stop: Rs{entry_exit['stop']:.2f} | Target: Rs{entry_exit['target']:.2f}")
+            else:
+                st.warning(prediction.get("reason", "No prediction available for this company."))
+
+            with st.expander("Full analysis (technical / fundamentals / sentiment / explainability / sources)"):
+                st.json(result)
+
+            st.caption(result.get("disclaimer", ""))

@@ -51,6 +51,18 @@ class ApiClient:
     def ask(self, symbol: str, query: str) -> dict:
         return self._post("/ai-analyst/ask", {"symbol": symbol, "query": query})
 
+    def resolve_company(self, identifier: str) -> dict:
+        return self._get(f"/company/{identifier}/resolve")
+
+    def analyze(self, company: str, horizon: str = "5d", analysis_type: str = "full") -> dict:
+        """Phase 26: the live pipeline for ANY supported company, not just the
+        precomputed 50-stock universe the other client methods above read.
+        """
+        return self._post(
+            "/analysis",
+            {"company": company, "horizon": horizon, "analysis_type": analysis_type},
+        )
+
     def _get(self, path: str, params: dict | None = None):
         response = requests.get(f"{self.base_url}{path}", params=params, timeout=DEFAULT_TIMEOUT)
         response.raise_for_status()

@@ -34,6 +34,12 @@ from src.rag.documents import (  # noqa: E402
     build_technical_documents,
 )
 from src.rag.retrieval import VectorIndex, load_sentence_transformer_embedder  # noqa: E402
+from src.security.resolver import (  # noqa: E402
+    AmbiguousCompanyError,
+    CompanyNotResolvedError,
+    resolve,
+)
+from src.services.company_analysis import analyze_company  # noqa: E402
 
 DATA_PROCESSED = PROJECT_ROOT / "data" / "processed"
 
@@ -86,6 +92,12 @@ def get_rag_index() -> VectorIndex:
 class AskRequest(BaseModel):
     symbol: str
     query: str
+
+
+class AnalysisRequest(BaseModel):
+    company: str
+    horizon: str = "5d"
+    analysis_type: str = "full"
 
 
 def _query_df(engine, sql: str, params: dict) -> pd.DataFrame:
@@ -207,3 +219,39 @@ def backtest(engine=Depends(get_db_engine)):
 @app.post("/ai-analyst/ask")
 def ai_analyst_ask(request: AskRequest, rag_index: VectorIndex = Depends(get_rag_index)):
     return answer_query(request.query, request.symbol, rag_index, k=4)
+
+
+@app.get("/company/{identifier}/resolve")
+def resolve_company(identifier: str):
+    """Phase 15: resolves a ticker/name (any supported NSE company, not just the
+    50-stock training universe) to a canonical symbol, without running any analysis.
+    """
+    try:
+        resolved = resolve(identifier)
+    except (CompanyNotResolvedError, AmbiguousCompanyError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {
+        "symbol": resolved.symbol,
+        "name": resolved.name,
+        "in_training_universe": resolved.in_training_universe,
+        "resolved_by": resolved.resolved_by,
+    }
+
+
+@app.post("/analysis")
+def run_analysis(request: AnalysisRequest):
+    """Phase 26: the live "train globally, infer locally" pipeline -- resolves any
+    supported company (in the 50-stock training universe or not), fetches its data
+    on demand, computes the same feature schema training used, and applies the
+    already-trained global model. Never retrains for this request.
+    """
+    try:
+        return analyze_company(
+            request.company, horizon=request.horizon, analysis_type=request.analysis_type
+        )
+    except (CompanyNotResolvedError, AmbiguousCompanyError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001 -- live network/data-source failures surface as 502s, not fabricated results
+        raise HTTPException(status_code=502, detail=f"Analysis failed: {exc}")

@@ -43,6 +43,14 @@ FEATURE_COLUMNS = [
 
 TARGET_COLUMN = "next_day_direction"
 
+# Bumped whenever FEATURE_COLUMNS or their computation changes in a way that would
+# make an older persisted model's inputs incompatible with the current pipeline
+# (Phase 19/32). A trained model's registry entry (src.models.registry) records the
+# schema version it was trained against; src.models.predict refuses to serve a model
+# whose recorded version doesn't match this constant, rather than silently feeding it
+# a differently-shaped feature vector.
+FEATURE_SCHEMA_VERSION = "1.0"
+
 
 def build_feature_table(technical_df: pd.DataFrame) -> pd.DataFrame:
     """Adds return/volatility features and normalizes absolute-price indicators to ratios."""
@@ -96,6 +104,20 @@ def build_ml_dataset(technical_df: pd.DataFrame) -> pd.DataFrame:
     df = add_target(df)
     required = FEATURE_COLUMNS + [TARGET_COLUMN]
     return df.dropna(subset=required).reset_index(drop=True)
+
+
+def build_latest_features(technical_df: pd.DataFrame) -> pd.DataFrame:
+    """Builds the same feature table as build_feature_table/build_ml_dataset -- the
+    identical transformation, so training and live inference can never silently
+    diverge (Phase 19's "same feature schema" requirement) -- but keeps only the
+    latest row per symbol and does not require a target.
+
+    build_ml_dataset can't be reused directly for this: it calls add_target, which
+    needs *tomorrow's* close to label today's row, so it always drops the most
+    recent day (the one row live inference actually needs a prediction for) as NaN.
+    """
+    df = build_feature_table(technical_df)
+    return df.sort_values(["symbol", "date"]).groupby("symbol").tail(1).reset_index(drop=True)
 
 
 def chronological_split(
