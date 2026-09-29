@@ -151,18 +151,30 @@ Built: `src/explainability/{shap_explainer,confidence}.py` (7 new tests, 107 tot
 
 Important unit note, verified by test not just asserted: SHAP values from `TreeExplainer` are in **log-odds (margin) units**, not probability points (`sigmoid(sum(shap_values) + expected_value) == predict_proba`) — factor contributions are reported and labeled as such rather than mislabeled as percentage points for a nicer-looking display.
 
+*Update (found while building Phase 11):* the saved `explainability_predictions.parquet` and `explainability_shap_values.parquet` didn't share row alignment — the first was saved with a fresh reset index, the second kept its original pre-reset index — so reloading them separately in a later notebook would have silently misaligned every row. Fixed by resetting both to a shared index before saving, and Phase 10 was re-executed to regenerate the corrected files.
+
 Confidence distribution came out fairly balanced (257 Low / 299 Medium / 229 High out of 785) — not overwhelmingly skewed toward "unsure" despite the near-0.50 ROC-AUC found in every prior phase. That's expected, not a contradiction: confidence measures how strongly the model leans, not whether the lean is correct. Cross-check: the top global SHAP features (`price_to_sma200`, `return_5d`, `volatility_60d`, `atr_pct`, `price_to_sma50`) substantially overlap with Phase 5's tree-split-based importances — two independent importance measures broadly agreeing is a reassuring pipeline-consistency signal.
 
 ---
 
 ## Phase 11 — LLM + RAG Layer
 
-- [ ] Build RAG index over company filings, financial results, news, corporate announcements, and the system's own model outputs
-- [ ] Respect the Tier 1–4 source reliability hierarchy (NSE/BSE/SEBI/filings > Reuters/Bloomberg > financial websites/analyst reports > blogs/forums/social)
-- [ ] Wire the LLM to explain quantitative outputs/evidence — it must not invent its own predictions
-- [ ] Support example AI Analyst queries (e.g. "Why is X bullish?", "What are the major risks?"), each answer traceable to a source
+- [x] Build RAG index over company filings, financial results, news, corporate announcements, and the system's own model outputs
+- [x] Respect the Tier 1–4 source reliability hierarchy (NSE/BSE/SEBI/filings > Reuters/Bloomberg > financial websites/analyst reports > blogs/forums/social)
+- [x] Wire the LLM to explain quantitative outputs/evidence — it must not invent its own predictions
+- [x] Support example AI Analyst queries (e.g. "Why is X bullish?", "What are the major risks?"), each answer traceable to a source
 
-**DoD:** AI Analyst answers grounded, sourced questions about a given stock using retrieved evidence + model outputs.
+**DoD:** AI Analyst answers grounded, sourced questions about a given stock using retrieved evidence + model outputs. Met.
+
+**Key decision (asked the user, since it materially changes the architecture and needs no invented capability):** no LLM API key is configured in this environment, and downloading a real generative model for local CPU inference would be slow and low quality. Per the user's choice, the "LLM" step is a **deterministic template composer**, not a generative model call — it can only restate retrieved document text plus its source/tier, so it structurally cannot invent facts or predictions (Section 32's core requirement is satisfied by construction, not by prompting). `answer_query`'s interface is decoupled from *how* answers are composed, so a real LLM (behind a strict "cite only what's retrieved" system prompt) can be swapped in later without touching retrieval/tiering.
+
+Built: `src/rag/{documents,retrieval,analyst}.py` (14 new tests, 122 total) — real `sentence-transformers` (all-MiniLM-L6-v2) embeddings, an in-memory cosine-similarity vector index (pgvector deferred to Phase 13's Postgres app) with tier-based trust-weighted re-ranking, and the template answer composer. `notebooks/11_llm_rag.ipynb` builds a 32-document corpus from Phases 4/6/8/10's real outputs and answers 4 example queries across 3 stocks.
+
+**Honest tiering, not inflated:** nothing is tagged Tier 1 (official NSE/BSE/SEBI/filings), because nothing was fetched directly from those sources — this project's prices/fundamentals are Yahoo-Finance-relayed (Tier 3), news is tiered per-provider (Reuters → Tier 2; Simply Wall St./GuruFocus/TechCrunch → Tier 3), and this project's own predictions/SHAP explanations are a distinct, always-labeled "internal model output" category, never conflated with an independent source. The tier-weighting sanity check (notebook Step 4) confirms trust-weighting actually changes ranking order, not just cosmetic labels.
+
+Retrieval worked well without any hardcoded query-intent routing — pure semantic search correctly surfaced the fundamentals document first for "strongest fundamental factors" and the actual news article first for "how has recent news affected this stock."
+
+**Bug found and fixed:** `build_news_documents` used `row["event_types"] or "none detected"`, which prints the literal text "nan" for a missing value — pandas `NaN` is truthy in Python, so the `or` fallback never triggers. Fixed with an explicit `pd.isna()` check.
 
 ---
 

@@ -26,6 +26,7 @@ shap==0.52.0
 #   pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
 torch==2.14.0
 transformers==5.17.0
+sentence-transformers==6.1.0
 
 # API / Dashboard
 fastapi==0.115.6
