@@ -72,6 +72,27 @@ def profit_factor(trade_returns: pd.Series) -> float:
     return float(gains / abs(losses))
 
 
-def turnover(signal: pd.Series) -> float:
+def active_position_rate(signal: pd.Series) -> float:
     """Fraction of (symbol, day) observations with an active position."""
     return float(signal.mean())
+
+
+def turnover(signal: pd.Series) -> float:
+    """Deprecated alias for active_position_rate -- kept for backward
+    compatibility. "Turnover" is a misleading name for this quantity (website
+    audit Section 25): it measures position *occupancy* (what fraction of
+    rows hold a position), not the traditional portfolio-turnover sense of how
+    much of the portfolio is bought/sold per period, which this project's
+    backtest doesn't separately track (it has no absolute position-size state
+    between days, only a daily hold/no-hold signal per symbol).
+    """
+    return active_position_rate(signal)
+
+
+def underperforms_benchmark(strategy_metric: float, benchmark_metric: float, higher_is_better: bool = True) -> bool:
+    """True if the strategy's metric is worse than the benchmark's (website audit
+    Section 24: this must drive a prominent warning, not a result buried in a tab).
+    """
+    if higher_is_better:
+        return strategy_metric < benchmark_metric
+    return strategy_metric > benchmark_metric

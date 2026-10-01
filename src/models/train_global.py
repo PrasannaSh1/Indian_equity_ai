@@ -170,6 +170,13 @@ def train_global_model(
         "test_rows": int(len(test)),
         "validation_metrics": val_metrics,
         "test_metrics": test_metrics,
+        # TARGET_COLUMN (next_day_direction) is a strict 1-trading-day-ahead label --
+        # recording that explicitly here lets callers (src.services.company_analysis)
+        # disclose it honestly instead of silently relabeling this as a multi-day
+        # forecast whenever a different horizon is requested (website audit: a
+        # requested 60-day horizon must not silently return a 1-day prediction).
+        "horizon_days": 1,
+        "training_data_cutoff_date": str(pd.Timestamp(val["date"].max()).date()),
     }
     register_model(entry, model_dir=model_dir)
     return entry

@@ -1,6 +1,6 @@
 import pytest
 
-from src.models.registry import load_all, load_latest, load_version, register_model
+from src.models.registry import QUANTILE_REGISTRY_FILENAME, load_all, load_latest, load_version, register_model
 
 
 def _entry(version, training_date):
@@ -49,3 +49,18 @@ def test_load_version_raises_for_unknown_version(tmp_path):
 
     with pytest.raises(ValueError):
         load_version("does-not-exist", model_dir=tmp_path)
+
+
+def test_classifier_and_quantile_registries_are_independent(tmp_path):
+    register_model(_entry("classifier_v1", "2026-01-01T00:00:00+00:00"), model_dir=tmp_path)
+    register_model(
+        _entry("quantile_v1", "2026-01-01T00:00:00+00:00"), model_dir=tmp_path, filename=QUANTILE_REGISTRY_FILENAME
+    )
+
+    classifier_entries = load_all(model_dir=tmp_path)
+    quantile_entries = load_all(model_dir=tmp_path, filename=QUANTILE_REGISTRY_FILENAME)
+
+    assert [e["model_version"] for e in classifier_entries] == ["classifier_v1"]
+    assert [e["model_version"] for e in quantile_entries] == ["quantile_v1"]
+    assert load_latest(model_dir=tmp_path)["model_version"] == "classifier_v1"
+    assert load_latest(model_dir=tmp_path, filename=QUANTILE_REGISTRY_FILENAME)["model_version"] == "quantile_v1"

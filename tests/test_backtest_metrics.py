@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from src.backtesting.metrics import (
+    active_position_rate,
     annualized_return,
     calmar_ratio,
     cumulative_return,
@@ -10,6 +11,7 @@ from src.backtesting.metrics import (
     sharpe_ratio,
     sortino_ratio,
     turnover,
+    underperforms_benchmark,
     win_rate,
 )
 
@@ -59,3 +61,23 @@ def test_win_rate_and_profit_factor_match_hand_computed_values():
 def test_turnover_is_the_mean_of_the_signal_column():
     signal = pd.Series([1, 0, 1, 1, 0])
     assert turnover(signal) == pytest.approx(0.6)
+
+
+def test_active_position_rate_matches_deprecated_turnover_alias():
+    signal = pd.Series([1, 0, 1, 1, 0])
+    assert active_position_rate(signal) == turnover(signal) == pytest.approx(0.6)
+
+
+def test_underperforms_benchmark_flags_strategy_worse_than_index():
+    # The project's actual documented backtest result: strategy loses, benchmark doesn't.
+    assert underperforms_benchmark(strategy_metric=-0.649, benchmark_metric=-0.078) is True
+
+
+def test_underperforms_benchmark_false_when_strategy_beats_benchmark():
+    assert underperforms_benchmark(strategy_metric=0.10, benchmark_metric=0.05) is False
+
+
+def test_underperforms_benchmark_respects_higher_is_better_false():
+    # e.g. comparing a cost ratio, where a LOWER number is the better outcome.
+    assert underperforms_benchmark(strategy_metric=0.02, benchmark_metric=0.01, higher_is_better=False) is True
+    assert underperforms_benchmark(strategy_metric=0.01, benchmark_metric=0.02, higher_is_better=False) is False

@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from src.entryexit.engine import compute_entry_exit
+from src.entryexit.engine import compute_entry_exit, compute_entry_exit_validated
 
 
 def test_compute_entry_exit_matches_hand_computed_zones_for_a_bullish_signal():
@@ -41,3 +41,24 @@ def test_compute_entry_exit_wider_stop_gives_wider_target_for_the_same_reward_ri
 
     assert out["stop"].iloc[1] < out["stop"].iloc[0]  # more volatile -> wider (lower) stop
     assert out["target"].iloc[1] > out["target"].iloc[0]  # and a further target, same R:R ratio
+
+
+def test_compute_entry_exit_validated_marks_normal_output_as_valid():
+    close = pd.Series([100.0])
+    atr = pd.Series([2.0])
+    probability_up = pd.Series([0.6])
+
+    out = compute_entry_exit_validated(close, atr, probability_up, threshold=0.55)
+
+    assert out["is_valid"].iloc[0] == True  # noqa: E712
+    assert out["invalid_reason"].iloc[0] is None
+
+
+def test_compute_entry_exit_validated_marks_no_signal_rows_as_valid():
+    close = pd.Series([100.0])
+    atr = pd.Series([2.0])
+    probability_up = pd.Series([0.4])
+
+    out = compute_entry_exit_validated(close, atr, probability_up, threshold=0.55)
+
+    assert out["is_valid"].iloc[0] == True  # noqa: E712 -- no signal is valid by definition

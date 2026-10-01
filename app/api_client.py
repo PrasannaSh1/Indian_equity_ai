@@ -54,6 +54,12 @@ class ApiClient:
     def resolve_company(self, identifier: str) -> dict:
         return self._get(f"/company/{identifier}/resolve")
 
+    def snapshot(self, symbol: str) -> dict:
+        return self._get(f"/stocks/{symbol}/snapshot")
+
+    def lineage(self, symbol: str) -> list[dict]:
+        return self._get(f"/stocks/{symbol}/lineage")
+
     def analyze(self, company: str, horizon: str = "5d", analysis_type: str = "full") -> dict:
         """Phase 26: the live pipeline for ANY supported company, not just the
         precomputed 50-stock universe the other client methods above read.

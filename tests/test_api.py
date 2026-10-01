@@ -130,7 +130,14 @@ def test_forecast_and_risk_endpoints(client):
     assert forecast["price_q50"] == pytest.approx(102.0)
 
     risk = client.get("/stocks/RELIANCE/risk").json()
-    assert risk == {"risk_score": 45.0, "risk_label": "Medium"}
+    assert risk["risk_score"] == 45.0
+    assert risk["risk_label"] == "Medium"
+    # model_predictions (this route's source table) is dated 2024-01-02 while the
+    # fixture's technical_features runs one day ahead (2024-01-03) -- risk correctly
+    # reports the shared, older snapshot date rather than silently mixing in the
+    # newer one, and surfaces the lag instead of hiding it.
+    assert risk["snapshot_as_of"] == "2024-01-02"
+    assert risk["lagging_sources"] == {"technical_features": 1}
 
 
 def test_history_endpoint_returns_ascending_dates_and_respects_days_limit(client):
@@ -212,6 +219,60 @@ def test_analysis_endpoint_runs_the_live_pipeline(monkeypatch):
 
     assert resp.status_code == 200
     assert resp.json() == fake_result
+
+
+def test_lineage_endpoint_returns_one_row_per_category(client):
+    resp = client.get("/stocks/RELIANCE/lineage")
+    assert resp.status_code == 200
+    categories = {row["category"] for row in resp.json()}
+    assert categories == {
+        "market_data",
+        "fundamentals_balance_sheet",
+        "fundamentals_valuation",
+        "news",
+        "model_classifier",
+        "model_quantile",
+    }
+
+
+def test_lineage_endpoint_reports_unavailable_fundamentals_period_when_not_recorded(client):
+    # The fixture's fundamentals_snapshot row predates the fiscal_year/valuation_as_of
+    # columns -- this must degrade to "unavailable", not crash or fabricate a date.
+    resp = client.get("/stocks/RELIANCE/lineage")
+    balance_sheet_row = next(r for r in resp.json() if r["category"] == "fundamentals_balance_sheet")
+    assert balance_sheet_row["as_of_or_period"] == "unavailable"
+
+
+def test_news_endpoint_falls_back_to_live_fetch_when_precomputed_is_empty(client, monkeypatch):
+    live_articles = pd.DataFrame(
+        {
+            "news_id": ["id1"],
+            "symbol": ["RELIANCE"],
+            "headline": ["Live headline"],
+            "summary": [""],
+            "source": ["Yahoo"],
+            "url": [""],
+            "published_timestamp": [pd.Timestamp("2026-09-30", tz="UTC")],
+        }
+    )
+    monkeypatch.setattr(
+        api_main, "fetch_with_fallback", lambda symbol: (live_articles, {"provider": "yahoo_finance", "retrieved_at": "2026-09-30T00:00:00+00:00"})
+    )
+    monkeypatch.setattr(
+        api_main,
+        "add_sentiment",
+        lambda articles, classify_fn: articles.assign(positive_probability=0.7, negative_probability=0.1, neutral_probability=0.2),
+    )
+    monkeypatch.setattr(api_main, "_default_sentiment_classify_fn", lambda: None)
+
+    resp = client.get("/stocks/RELIANCE/news")
+
+    assert resp.status_code == 200
+    records = resp.json()
+    assert len(records) == 1
+    assert records[0]["source_mode"] == "live_fallback"
+    assert records[0]["retrieved_at"] == "2026-09-30T00:00:00+00:00"
+    assert records[0]["headline"] == "Live headline"
 
 
 def test_analysis_endpoint_returns_422_for_unresolvable_company(monkeypatch):

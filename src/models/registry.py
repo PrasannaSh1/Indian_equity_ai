@@ -15,39 +15,45 @@ from pathlib import Path
 
 DEFAULT_MODEL_DIR = Path(__file__).resolve().parents[2] / "data" / "models"
 REGISTRY_FILENAME = "registry.json"
+# A second, independent registry log for quantile-regression models (src.models.
+# train_quantiles.py) -- kept as a separate file rather than mixed into
+# registry.json since a quantile-model entry's shape (model_paths per quantile,
+# coverage metric) differs from a classifier entry's, and callers always know
+# which kind they want.
+QUANTILE_REGISTRY_FILENAME = "quantile_registry.json"
 
 
-def _registry_path(model_dir: Path) -> Path:
-    return model_dir / REGISTRY_FILENAME
+def _registry_path(model_dir: Path, filename: str = REGISTRY_FILENAME) -> Path:
+    return model_dir / filename
 
 
-def register_model(entry: dict, model_dir: Path = DEFAULT_MODEL_DIR) -> None:
+def register_model(entry: dict, model_dir: Path = DEFAULT_MODEL_DIR, filename: str = REGISTRY_FILENAME) -> None:
     """Appends one entry to the registry log, keyed by model_version (re-registering
     the same version replaces its old entry rather than duplicating it).
     """
     model_dir.mkdir(parents=True, exist_ok=True)
-    entries = [e for e in load_all(model_dir) if e["model_version"] != entry["model_version"]]
+    entries = [e for e in load_all(model_dir, filename) if e["model_version"] != entry["model_version"]]
     entries.append(entry)
-    _registry_path(model_dir).write_text(json.dumps(entries, indent=2, default=str), encoding="utf-8")
+    _registry_path(model_dir, filename).write_text(json.dumps(entries, indent=2, default=str), encoding="utf-8")
 
 
-def load_all(model_dir: Path = DEFAULT_MODEL_DIR) -> list[dict]:
-    path = _registry_path(model_dir)
+def load_all(model_dir: Path = DEFAULT_MODEL_DIR, filename: str = REGISTRY_FILENAME) -> list[dict]:
+    path = _registry_path(model_dir, filename)
     if not path.exists():
         return []
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def load_latest(model_dir: Path = DEFAULT_MODEL_DIR) -> dict | None:
+def load_latest(model_dir: Path = DEFAULT_MODEL_DIR, filename: str = REGISTRY_FILENAME) -> dict | None:
     """Returns the most recently trained registry entry, or None if none exist yet."""
-    entries = load_all(model_dir)
+    entries = load_all(model_dir, filename)
     if not entries:
         return None
     return max(entries, key=lambda e: e["training_date"])
 
 
-def load_version(model_version: str, model_dir: Path = DEFAULT_MODEL_DIR) -> dict:
-    for entry in load_all(model_dir):
+def load_version(model_version: str, model_dir: Path = DEFAULT_MODEL_DIR, filename: str = REGISTRY_FILENAME) -> dict:
+    for entry in load_all(model_dir, filename):
         if entry["model_version"] == model_version:
             return entry
     raise ValueError(f"No registry entry for model_version={model_version!r}")

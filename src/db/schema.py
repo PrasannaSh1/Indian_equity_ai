@@ -78,11 +78,17 @@ fundamentals_snapshot = Table(
     "fundamentals_snapshot",
     metadata,
     Column("symbol", String, primary_key=True),
+    # fiscal_year/valuation_as_of are additive, nullable (website audit: the
+    # fiscal-year balance-sheet ratios and today's valuation snapshot are two
+    # different "as of" bases and must carry their own period/date, not be
+    # silently conflated into one undated row).
+    Column("fiscal_year", String),
     Column("roe", Float),
     Column("roce", Float),
     Column("debt_to_equity", Float),
     Column("current_ratio", Float),
     Column("revenue_growth_yoy", Float),
+    Column("valuation_as_of", Date),
     Column("pe_ratio", Float),
     Column("pb_ratio", Float),
     Column("dividend_yield", Float),

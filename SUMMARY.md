@@ -11,10 +11,12 @@ price/technical/fundamental/news/macro data feeding probabilistic, explainable p
 served through a FastAPI backend and Streamlit dashboard with an AI Analyst.
 **What this is not:** a guaranteed-returns system or investment advice.
 
-**Status:** All 14 planned phases complete, plus an in-progress generalization effort (Phases
-15–26) moving the platform from "50 fixed stocks" to "train globally on the 50-stock universe,
-infer live on any supported NSE company" — see below. Universe: 50 stocks (NIFTY 50), configured
-in `src/config.py`. Test suite: 191/191 passing.
+**Status:** All 14 planned phases complete, the generalization effort (Phases 15–26, "train
+globally, infer locally") complete, plus a website-audit remediation pass fixing a real,
+independently-verified data-snapshot-consistency bug and adding confidence-calibrated signal
+labels, live price-quantile forecasts, a news-provider abstraction, itemized backtest costs, and
+a Data & Model Lineage panel — see below. Universe: 50 stocks (NIFTY 50), configured in
+`src/config.py`. Test suite: 255/255 passing.
 
 ---
 
@@ -38,6 +40,14 @@ different angle: companies the model never saw during training (ROC-AUC 0.525) p
 statistically the same as companies it did see (0.512) — both near coin-flip. That is itself a
 consistency check that the architecture works technically (no crash, no leakage, no degenerate
 output), not evidence of a real edge in either direction.
+
+A **real, independently-verified data bug** was found and fixed during the website-audit pass
+(below): the precomputed dashboard's `model_predictions`/`entry_exit` tables were silently 7 days
+stale relative to `prices_daily`/`technical_features` (different notebooks last re-run on
+different days), producing exactly the contradictory header-vs-forecast prices and a
+mathematically "backwards" stop-loss the audit reported. This was a data-pipeline bug, not a
+finding about market predictability — see "Website audit remediation" below for the fix and how
+it was verified against the real, reproducing data.
 
 ---
 
@@ -108,6 +118,85 @@ handling for real (currently only unit-tested with a synthetic stale version).
 
 ---
 
+## Website audit remediation: single-snapshot consistency, calibrated signals, lineage
+
+A user audit of the deployed dashboard found several numbers that contradicted each other (e.g.
+header close ₹2,831 next to a forecast range of ₹2,927–₹3,023) and a mathematically "backwards"
+long-trade stop-loss (above the current price). Root-cause investigation found and fixed the
+actual bug, plus added several transparency/calibration features the audit requested:
+
+- **Root cause, confirmed and independently reproduced in the real repo data:**
+  `src/api/main.py`'s per-table "latest date" queries (`prices_daily`/`technical_features` vs
+  `model_predictions`/`entry_exit`) could silently diverge — verified directly: the former pair
+  was dated 2026-09-28, the latter pair 2026-09-21, a week apart, because the notebooks producing
+  them were last re-run on different days. `src/entryexit/engine.py`'s stop-loss formula was
+  confirmed mathematically correct throughout (`stop = close - multiple*atr` is always `< close`
+  for the same row) — the "backwards stop" was this same cross-table desync, not a formula bug.
+- **Fix:** `src/validation/snapshot.py::resolve_snapshot()` finds the one date every populated
+  source table agrees on; every snapshot-dependent API route (`overview`, `technical`, `forecast`,
+  `risk`, `entry-exit`, `explanation`) now serves that shared date instead of each independently
+  picking its own table's max date, and a new `GET /stocks/{symbol}/snapshot` route plus a
+  dashboard "Analysis as of" badge make staleness visible rather than silently contradictory.
+  Verified against the real, still-reproducing data: after the fix, `/overview` and `/forecast`
+  for ADANIENT both consistently report `snapshot_as_of = 2026-09-21`, flagged `"very_stale"`.
+- **Confidence-gated signal labels** (`src/validation/signal.py`): "Bullish"/"Bearish" previously
+  came from `probability_up > 0.5` alone, ignoring model confidence entirely — a 57.9% probability
+  with confidence 0.11 (near coin-flip) was shown as unqualified "Bullish". Now gated by the same
+  thresholds `src/explainability/confidence.py` already defines: low confidence always reports
+  "Low Confidence" regardless of direction. Thresholds are an explicitly-flagged, uncalibrated
+  starting policy, not validated against real calibration data (consistent with the project's own
+  quantile-calibration caution below).
+- **Live price-quantile forecast**: `src/models/train_quantiles.py` persists a quantile-regression
+  model (reusing `src/risk/quantiles.py`'s existing fit/predict machinery) the same way
+  `train_global.py` persists the classifier, so the live orchestrator (`analyze_company()`) now
+  also returns a `price_q10/q50/q90` range from the same snapshot as everything else. Honest
+  result: this specific model's held-out 80%-interval coverage was **75.9%** — different from (and
+  somewhat better than) the previously-documented Phase 8 notebook model's ~64%, most likely due
+  to different hyperparameters/config between the two independently-trained models. Both numbers
+  are below the 80% target; this is reported as-is, not reconciled or improved to match either
+  prior figure.
+- **Horizon-mislabeling bug found during this pass**: requesting `horizon="60d"` silently returned
+  the same 1-trading-day-ahead classifier prediction relabeled as if it were a 60-day forecast.
+  Scoped to a disclosure-only fix (not full multi-horizon model training, which is materially
+  larger): the response now includes `served_horizon_days` and an explicit note when the
+  requested horizon isn't actually what was modeled.
+- **News provider abstraction** (`src/news/providers/`): a `NewsProvider` interface with
+  `YahooNewsProvider` as the only real implementation today and a `fetch_with_fallback()` chain,
+  so a future second provider plugs in without touching call sites. The old dashboard's News tab
+  previously only ever read the permanently-empty precomputed `news` table (empty due to the
+  already-documented Yahoo outage during original data collection, not a bug); it now falls back
+  to a live fetch when the precomputed table is empty.
+- **Itemized backtest transaction costs** (`src/backtesting/engine.py::compute_itemized_transaction_costs`):
+  replaced the flat combined-bps assumption with an itemized brokerage/STT/exchange-charges/SEBI-
+  turnover-fee/stamp-duty/GST/slippage breakdown (illustrative research-grade approximations,
+  documented as such, not a live broker rate card) totaling ~16.9bps round-trip, close to the
+  original flat ~15bps estimate. `turnover()` (which actually measured position-occupancy, not
+  portfolio turnover) is renamed `active_position_rate()`, with `turnover` kept as a deprecated
+  alias. A prominent dashboard warning now shows when the strategy underperforms its benchmark
+  net of costs (it does: -56.2% vs -7.6% for buy-and-hold NIFTY 50 in the current data), instead
+  of that only being visible inside the Backtest tab.
+- **Fundamentals metadata**: `fundamentals_snapshot` previously had no period/source fields at
+  all, conflating fiscal-year balance-sheet ratios (ROE, ROCE, Debt/Equity) with today's valuation
+  snapshot (P/E, P/B) into one flat, undated row. `notebooks/04_fundamental_features.ipynb` was
+  re-run (scoped to just that one notebook, not the full pipeline) to backfill `fiscal_year`/
+  `valuation_as_of` columns for the 50-stock universe; the live orchestrator's fundamentals block
+  now separates `balance_sheet_basis` from `valuation_basis` explicitly.
+- **Data & Model Lineage panel**: a new `GET /stocks/{symbol}/lineage` route (old path) and
+  `response["lineage"]` (live path) reuse `src/rag/documents.py`'s existing Tier 1–4/model_output
+  source-reliability system — no new tiering logic invented — to show source/tier/as-of for market
+  data, fundamentals (both bases), news, and both models, explicitly separating a model's training
+  cutoff from the market data it's being applied to.
+- Verified end-to-end in the browser against real, live-reproducing data (not just synthetic
+  tests): the staleness badge, the backtest-underperformance warning, confidence-downgraded
+  signal labels, the lineage table, and the live quantile range + horizon-disclosure note all
+  render correctly for both a precomputed-universe symbol (ADANIENT) and a live "Analyze Any
+  Company" query (DIXON, 60-day horizon).
+- Test suite: 255/255 passing (191 → 255; new coverage for `src/validation/`, the news-provider
+  chain, quantile train/predict, `AnalysisContext`/lineage, itemized costs, and snapshot-
+  consistency regression tests that directly mirror the real repo's confirmed data drift).
+
+---
+
 ## Key architectural decisions (asked of the user, not assumed)
 
 - **LLM (Phase 11):** no API key configured → the "AI Analyst" is a **deterministic template
@@ -138,9 +227,11 @@ handling for real (currently only unit-tested with a synthetic stale version).
 - **Fundamentals coverage varies.** Bank statements (HDFCBANK) don't report EBIT, so
   ROCE/current-ratio/interest-coverage are `NaN` for banks by design (Phase 4). At 50-stock
   scale, 47/50 got a full Fundamental Score; 3 didn't (reported via warning, not a crash).
-- **Quantile forecast is under-calibrated.** Phase 8's 10–90 price range showed ~64% empirical
-  coverage against an ~80% target — read as relative-uncertainty guidance, not a literal
-  confidence interval, until recalibrated.
+- **Quantile forecast is under-calibrated.** Phase 8's original notebook model showed ~64%
+  empirical coverage against an ~80% target; the persisted model now served live
+  (`src/models/train_quantiles.py`) independently measured ~75.9% on its own held-out split —
+  better, but still below target. Both numbers are reported as-is, not reconciled; read either as
+  relative-uncertainty guidance, not a literal confidence interval, until recalibrated.
 - **Intraday is out of scope.** This project only has daily EOD data; a genuine intraday model
   (Section 26) would need a different, likely paid, real-time data source (Phase 12).
 
@@ -185,6 +276,19 @@ this project's practice of verifying before declaring a phase done.
     NaN'd every downstream technical feature for the "latest" row. Found by actually running the
     new live orchestrator against real data, not from a unit test; fixed by dropping rows with
     no close before computing indicators (Phase 26).
+15. **Cross-table snapshot desync** (website audit): `prices_daily`/`technical_features` and
+    `model_predictions`/`entry_exit` can silently drift apart in max date (confirmed 7 days apart
+    in real data) since each API route picked its own table's latest date independently —
+    produced the audit's reported header-vs-forecast price mismatch and "backwards" stop-loss.
+    Fixed with a shared common-date resolver (`src/validation/snapshot.py`); see "Website audit
+    remediation" above for full detail.
+16. **Dashboard picked the wrong backtest column for the underperformance warning**: iterating
+    `backtest_pivot.columns` and taking the first non-benchmark entry alphabetically selected
+    `strategy_gross` (-4.5%, looks fine next to NIFTY's -7.6%) instead of `strategy_net_of_cost`
+    (-56.2%, the actually-damning comparison) — would have silently suppressed the exact warning
+    this pass was built to add. Found by manually verifying the feature in a browser against real
+    data, not by a unit test; fixed by naming the `strategy_net_of_cost` column explicitly
+    (website audit remediation).
 
 ---
 
@@ -200,22 +304,26 @@ Plotly, pytest. Full list in `requirements.txt`.
   authoritative, executed record of that phase's results.
 - **Reusable pipeline code:** `src/` (mirrors the phase structure: `ingestion`, `features`,
   `technical`, `fundamentals`, `models`, `news`, `macro`, `regime`, `risk`, `backtesting`,
-  `explainability`, `rag`, `entryexit`, `db`, `api`), plus the generalization additions
-  `security` (resolver), `data_quality` (eligibility), and `services` (live orchestrator).
+  `explainability`, `rag`, `entryexit`, `db`, `api`), the generalization additions `security`
+  (resolver), `data_quality` (eligibility), and `services` (live orchestrator, `AnalysisContext`,
+  lineage), and the website-audit additions `validation` (snapshot/entry-exit/signal/freshness)
+  and `news/providers` (provider-fallback chain).
 - **App:** `src/api/main.py` (FastAPI) + `app/dashboard.py` (Streamlit) + `app/{api_client,charts}.py`.
-- **Tests:** `tests/`, 191 passing — hand-computed or analytically-derived reference values
+- **Tests:** `tests/`, 255 passing — hand-computed or analytically-derived reference values
   throughout, not just "does it run" checks.
 - **Data:** `data/processed/*` (parquet/CSV, regenerated by the notebooks), `data/models/*`
-  (persisted global model + `registry.json`, regenerated by `train_global.py`), and `data/app.db`
-  (SQLite, regenerated by `python -m src.db.load_data`) — all gitignored, not committed.
+  (persisted global classifier + quantile models + their registries, regenerated by
+  `train_global.py`/`train_quantiles.py`), and `data/app.db` (SQLite, regenerated by
+  `python -m src.db.load_data`) — all gitignored, not committed.
 
 ## Running it
 
 ```bash
 venv\Scripts\activate
 pip install -r requirements.txt
-pytest                                    # 191 tests
-python -m src.models.train_global         # persist the global model to data/models/
+pytest                                    # 255 tests
+python -m src.models.train_global         # persist the global classifier to data/models/
+python -m src.models.train_quantiles      # persist the price-quantile models to data/models/
 python -m src.db.load_data                # populate data/app.db from data/processed/
 uvicorn src.api.main:app --reload         # API on :8000
 streamlit run app/dashboard.py            # dashboard on :8501

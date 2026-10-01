@@ -52,9 +52,15 @@ Structured analysis response, tagged with training_universe_member: true/false
   see — both near coin-flip, consistent with this project's other honest "no demonstrated edge"
   findings (see `SUMMARY.md`). The architecture works technically; it is not evidence of a real
   predictive edge in either direction.
-- **Live entry points:** `POST /analysis` and `GET /company/{id}/resolve` (`src/api/main.py`),
-  and the "Analyze Any Company" tab in the Streamlit dashboard — both additive, alongside the
-  original precomputed-50-stock routes/tabs, which are unchanged.
+- **Live entry points:** `POST /analysis`, `GET /company/{id}/resolve`, `GET /stocks/{symbol}/snapshot`,
+  and `GET /stocks/{symbol}/lineage` (`src/api/main.py`), and the "Analyze Any Company" tab in the
+  Streamlit dashboard — all additive, alongside the original precomputed-50-stock routes/tabs.
+- **Single-snapshot consistency (`src/validation/`):** every precomputed route resolves one shared
+  "as of" date across its source tables before serving data, instead of each table independently
+  reporting its own latest date — this is what prevents a stale forecast/entry-exit being served
+  next to a fresher header price. Confidence-gated signal labels, entry/exit setup validation, and
+  a trading-calendar-aware staleness policy live here too; see `SUMMARY.md`'s "Website audit
+  remediation" section for the exact bug this fixed and how it was verified.
 
 ## Setup
 
@@ -74,7 +80,8 @@ pytest
 ## Run the app
 
 ```bash
-python -m src.models.train_global     # persist the global model to data/models/ (once, or after a retrain)
+python -m src.models.train_global     # persist the global classifier to data/models/ (once, or after a retrain)
+python -m src.models.train_quantiles  # persist the price-quantile models to data/models/
 python -m src.db.load_data            # populate data/app.db from data/processed/
 uvicorn src.api.main:app --reload     # API on :8000
 streamlit run app/dashboard.py        # dashboard on :8501
@@ -126,7 +133,12 @@ Full detail and the reasoning behind each is in `SUMMARY.md`; in short:
   historical archive.
 - **Fundamentals coverage varies by sector.** Bank/NBFC statements don't report EBIT, so
   ROCE/current-ratio/interest-coverage are left `null`, not fabricated.
-- **Quantile price-range forecasts are under-calibrated** (~64% empirical coverage against an
-  ~80% target) — read as relative-uncertainty guidance, not a literal confidence interval.
+- **Quantile price-range forecasts are under-calibrated** (the original notebook model showed
+  ~64% empirical coverage against an ~80% target; the currently-persisted live model independently
+  measured ~75.9% on its own held-out split — better, still below target) — read either as
+  relative-uncertainty guidance, not a literal confidence interval.
+- **Backtest transaction costs are an illustrative approximation**, itemized (brokerage/STT/
+  exchange charges/SEBI fees/stamp duty/GST/slippage, `src/backtesting/engine.py`) but not a live
+  broker rate card — verify current rates before relying on this for a real trading decision.
 - **No licensed Tier-1 data.** All price/fundamentals/news data is Yahoo-relayed (Tier 3), not
   fetched directly from NSE/BSE/SEBI — see "Data licensing" above.

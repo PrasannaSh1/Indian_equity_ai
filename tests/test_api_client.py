@@ -83,3 +83,21 @@ def test_resolve_company_requests_the_correct_url():
 
     mock_get.assert_called_once_with("http://testserver/company/TCS/resolve", params=None, timeout=15)
     assert result == {"symbol": "TCS"}
+
+
+def test_snapshot_requests_the_correct_url():
+    client = ApiClient(base_url="http://testserver")
+    with patch("app.api_client.requests.get", return_value=_mock_response({"as_of": "2026-09-28"})) as mock_get:
+        result = client.snapshot("TCS")
+
+    mock_get.assert_called_once_with("http://testserver/stocks/TCS/snapshot", params=None, timeout=15)
+    assert result == {"as_of": "2026-09-28"}
+
+
+def test_lineage_requests_the_correct_url():
+    client = ApiClient(base_url="http://testserver")
+    with patch("app.api_client.requests.get", return_value=_mock_response([{"category": "market_data"}])) as mock_get:
+        result = client.lineage("TCS")
+
+    mock_get.assert_called_once_with("http://testserver/stocks/TCS/lineage", params=None, timeout=15)
+    assert result == [{"category": "market_data"}]

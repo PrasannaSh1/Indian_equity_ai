@@ -20,6 +20,8 @@ import streamlit as st
 
 from app.api_client import ApiClient
 from app.charts import OSCILLATOR_OPTIONS, OVERLAY_OPTIONS, build_price_chart
+from src.backtesting.metrics import underperforms_benchmark
+from src.validation.signal import classify_signal
 
 st.set_page_config(page_title="Indian Equity AI Analyst", layout="wide")
 
@@ -54,16 +56,57 @@ if error:
 
 symbol = st.selectbox("Search a stock", stocks)
 
+snapshot, _ = safe_call(client.snapshot, symbol)
+if snapshot:
+    as_of_text = f"Analysis as of: {snapshot['as_of']} ({snapshot['staleness_label'].replace('_', ' ')})"
+    if snapshot["staleness_label"] == "fresh":
+        st.caption(as_of_text)
+    else:
+        st.warning(
+            f"⚠ {as_of_text}. Not every data source for {symbol} has refreshed since then -- "
+            f"see the Data & Model Lineage panel below for which ones."
+        )
+
+backtest, _ = safe_call(client.backtest)
+if backtest:
+    backtest_pivot = pd.DataFrame(backtest).pivot(index="metric", columns="system", values="value")
+    # Specifically the net-of-cost column, not just "any non-benchmark column" --
+    # the honest comparison for Section 22's warning is net-of-cost performance
+    # (what an investor would have actually realized), not the gross return, which
+    # can look deceptively fine on its own (website audit: don't hide negative
+    # performance behind a rosier gross number).
+    if "cumulative_return" in backtest_pivot.index and "strategy_net_of_cost" in backtest_pivot.columns and "nifty50_buy_and_hold" in backtest_pivot.columns:
+        strategy_return = backtest_pivot.loc["cumulative_return", "strategy_net_of_cost"]
+        benchmark_return = backtest_pivot.loc["cumulative_return", "nifty50_buy_and_hold"]
+        if pd.notna(strategy_return) and pd.notna(benchmark_return) and underperforms_benchmark(
+            strategy_return, benchmark_return
+        ):
+            st.warning(
+                f"⚠ **Historical backtesting indicates this strategy underperformed its benchmark** "
+                f"during the tested period (net of costs: {strategy_return:.1%} vs {benchmark_return:.1%} "
+                f"for buy-and-hold NIFTY 50). This model should not be interpreted as a validated "
+                f"profitable trading strategy -- see the Backtest tab for detail."
+            )
+
 overview, _ = safe_call(client.overview, symbol)
 forecast, _ = safe_call(client.forecast, symbol)
+explanation_header, _ = safe_call(client.explanation, symbol)
 
 if overview:
     col1, col2, col3 = st.columns(3)
     col1.metric(f"{symbol} — Close", f"Rs{overview['close']:.2f}")
     if forecast:
-        direction = "Bullish" if forecast["probability_up"] > 0.5 else "Bearish"
-        col2.metric("AI Outlook", direction, f"{forecast['probability_up']:.1%} P(up)")
+        confidence = explanation_header["confidence"] if explanation_header else 0.0
+        signal = classify_signal(forecast["probability_up"], confidence)
+        col2.metric("AI Outlook", signal.label, f"{forecast['probability_up']:.1%} P(up)")
         col3.metric("Risk", forecast["risk_label"], f"{forecast['risk_score']:.0f}/100")
+
+with st.expander("Data & Model Lineage"):
+    lineage_rows, lineage_err = safe_call(client.lineage, symbol)
+    if lineage_rows:
+        st.dataframe(pd.DataFrame(lineage_rows))
+    else:
+        st.caption(lineage_err or "Lineage unavailable for this symbol.")
 
 tabs = st.tabs(
     [
@@ -119,12 +162,22 @@ with tabs[2]:
     st.subheader("Fundamentals")
     fundamentals, err = safe_call(client.fundamentals, symbol)
     if fundamentals:
+        fiscal_year = fundamentals.get("fiscal_year")
+        valuation_as_of = fundamentals.get("valuation_as_of")
         st.metric("Fundamental Score", f"{fundamentals['fundamental_score']:.0f}/100")
         cols = st.columns(4)
         cols[0].metric("ROE", f"{fundamentals['roe']:.1%}")
         cols[1].metric("Debt/Equity", f"{fundamentals['debt_to_equity']:.2f}")
         cols[2].metric("Revenue Growth (YoY)", f"{fundamentals['revenue_growth_yoy']:.1%}")
         cols[3].metric("P/E", f"{fundamentals['pe_ratio']:.1f}")
+        if fiscal_year and valuation_as_of:
+            st.caption(
+                f"ROE / Debt-Equity / Revenue Growth: fiscal year {fiscal_year} (balance sheet basis). "
+                f"P/E: as of {valuation_as_of} (today's valuation snapshot) -- these are two different "
+                f"'as of' bases, not the same date."
+            )
+        else:
+            st.caption("This dataset does not currently record a per-field as-of date for this symbol.")
     else:
         st.warning(err or "No fundamentals data available.")
 
@@ -132,6 +185,10 @@ with tabs[3]:
     st.subheader("News")
     news, err = safe_call(client.news, symbol)
     if news:
+        if news[0].get("source_mode") == "live_fallback":
+            st.caption(f"Live fallback fetch (precomputed dataset had no articles) -- retrieved at {news[0].get('retrieved_at')}.")
+        else:
+            st.caption("From the precomputed dataset.")
         for item in news:
             st.markdown(f"**{item['headline']}**  \n*{item['source']} — {item['published_timestamp']}*")
     else:
@@ -182,12 +239,12 @@ with tabs[6]:
 
 with tabs[7]:
     st.subheader("Backtest")
-    backtest, err = safe_call(client.backtest)
     if backtest:
         df = pd.DataFrame(backtest).pivot(index="metric", columns="system", values="value")
+        df = df.rename(index={"turnover": "active_position_rate (fraction of days with an open position)"})
         st.dataframe(df)
     else:
-        st.warning(err or "No backtest results available.")
+        st.warning("No backtest results available.")
 
 with tabs[8]:
     st.subheader("AI Analyst")
@@ -238,20 +295,36 @@ with tabs[9]:
             prediction = result["prediction"]
             if prediction.get("available"):
                 cols = st.columns(3)
-                direction = "Bullish" if prediction["probability_up"] > 0.5 else "Bearish"
-                cols[0].metric("AI Outlook", direction, f"{prediction['probability_up']:.1%} P(up)")
+                cols[0].metric("AI Outlook", prediction["signal_label"], f"{prediction['probability_up']:.1%} P(up)")
                 cols[1].metric("Confidence", prediction["confidence_label"], f"{prediction['confidence']:.2f}")
                 risk = result["risk"]
                 if risk.get("available"):
                     cols[2].metric("Risk", risk["risk_label"], f"{risk['risk_score']:.0f}/100")
 
+                if prediction.get("horizon_note"):
+                    st.caption(prediction["horizon_note"])
+
+                if prediction.get("price_quantiles_available"):
+                    st.write(
+                        f"Predicted next-day price range: Rs{prediction['price_q10']:.2f} — "
+                        f"Rs{prediction['price_q50']:.2f} — Rs{prediction['price_q90']:.2f}"
+                    )
+                else:
+                    st.caption(prediction.get("price_quantiles_reason", "Price range forecast unavailable."))
+
                 entry_exit = result["entry_exit"]
                 if entry_exit.get("available") and entry_exit.get("has_signal"):
-                    st.markdown("**Entry/Exit (hypothetical, not guaranteed):**")
-                    st.write(f"Entry Zone: Rs{entry_exit['entry_low']:.2f} — Rs{entry_exit['entry_high']:.2f}")
-                    st.write(f"Stop: Rs{entry_exit['stop']:.2f} | Target: Rs{entry_exit['target']:.2f}")
+                    if entry_exit.get("valid"):
+                        st.markdown("**Entry/Exit (hypothetical, not guaranteed):**")
+                        st.write(f"Entry Zone: Rs{entry_exit['entry_low']:.2f} — Rs{entry_exit['entry_high']:.2f}")
+                        st.write(f"Stop: Rs{entry_exit['stop']:.2f} | Target: Rs{entry_exit['target']:.2f}")
+                    else:
+                        st.warning(f"Entry/exit setup flagged INVALID, not shown: {entry_exit['invalid_reason']}")
             else:
                 st.warning(prediction.get("reason", "No prediction available for this company."))
+
+            with st.expander("Data & Model Lineage"):
+                st.dataframe(pd.DataFrame(result.get("lineage", [])))
 
             with st.expander("Full analysis (technical / fundamentals / sentiment / explainability / sources)"):
                 st.json(result)

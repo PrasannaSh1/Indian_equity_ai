@@ -35,9 +35,15 @@ def load_technical_features(engine, data_processed: Path) -> int:
 def load_fundamentals_snapshot(engine, data_processed: Path) -> int:
     df = pd.read_csv(data_processed / "fundamentals_snapshot.csv", index_col=0)
     df = df.reset_index().rename(columns={"index": "symbol"})
+    # fiscal_year/valuation_as_of are additive: older fundamentals_snapshot.csv
+    # files (predating the website-audit fundamentals-metadata fix) won't have
+    # them -- backfilled as null rather than failing the whole load.
+    for optional_col in ("fiscal_year", "valuation_as_of"):
+        if optional_col not in df.columns:
+            df[optional_col] = None
     cols = [
-        "symbol", "roe", "roce", "debt_to_equity", "current_ratio",
-        "revenue_growth_yoy", "pe_ratio", "pb_ratio", "dividend_yield", "fundamental_score",
+        "symbol", "fiscal_year", "roe", "roce", "debt_to_equity", "current_ratio",
+        "revenue_growth_yoy", "valuation_as_of", "pe_ratio", "pb_ratio", "dividend_yield", "fundamental_score",
     ]
     df = df[cols]
     df.to_sql("fundamentals_snapshot", engine, if_exists="replace", index=False)

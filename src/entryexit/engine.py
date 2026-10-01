@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from src.validation.entry_exit import validate_long_setup
+
 DEFAULT_THRESHOLD = 0.55
 DEFAULT_ENTRY_BUFFER_PCT = 0.005  # 0.5% band above today's close
 DEFAULT_STOP_ATR_MULTIPLE = 1.5
@@ -50,3 +52,20 @@ def compute_entry_exit(
             "target": target,
         }
     )
+
+
+def compute_entry_exit_validated(*args, **kwargs) -> pd.DataFrame:
+    """compute_entry_exit's formula is correct by construction (stop is always
+    below close when atr/close come from the same row -- see validate_long_setup's
+    docstring), but this wrapper is the hook point that catches a logically
+    inconsistent setup from reaching the UI (whatever the cause, e.g. a caller
+    mixing levels from different snapshots) -- website audit Section 15. Adds
+    is_valid/invalid_reason columns; never silently drops or hides a row.
+    """
+    df = compute_entry_exit(*args, **kwargs)
+    validations = [
+        validate_long_setup(row.stop, row.entry_low, row.entry_high, row.target) for row in df.itertuples()
+    ]
+    df["is_valid"] = [v.valid for v in validations]
+    df["invalid_reason"] = [v.reason for v in validations]
+    return df

@@ -253,6 +253,66 @@ Also carried forward: `import torch` before pandas/pyarrow (Phase 6's finding) a
 
 ---
 
+## Phase 15 — Generalization: Train Globally, Infer Locally
+
+- [x] Resolve any supported NSE company (ticker, `.NS`/`.BO`, or name), not just the 50-stock training universe
+- [x] Persist a trained global model (previously only ever fit inside a notebook, never saved)
+- [x] Gate live inference on real data sufficiency instead of feeding a partial feature row
+- [x] Build a live orchestrator that fetches, computes features, predicts, and explains for any company on demand, without retraining
+- [x] Validate the "train on one set of companies, infer on another" claim with a held-out-company test
+
+**DoD:** A company deliberately excluded from training can be analyzed end-to-end (resolve → live fetch → same feature schema as training → the already-trained global model → risk/entry-exit/SHAP), explicitly flagged as not-in-training-universe, without retraining the model. Met — verified live via `POST /analysis` and the dashboard's "Analyze Any Company" tab for both a training-universe company (TCS) and a deliberately-excluded one (DIXON Technologies); identical code path, differing only in the `training_universe_member` flag.
+
+**Core principle:** the global model is trained once on the 50-stock universe and applied live to any company on request — never retrained per request. Analysis Universe (any resolvable NSE company) is a strict superset of Training Universe (the 50 stocks `train_global.py` fits on).
+
+Built:
+- `src/security/resolver.py` — ticker/`.NS`/`.BO`/company-name → canonical symbol, with a verified alias map for the 50 NIFTY constituents; unresolved tickers are returned as a plausible analysis-universe candidate, not a resolution failure
+- `src/data_quality/eligibility.py` — refuses inference (`INSUFFICIENT_DATA`) when a company's live-fetched history can't produce a complete feature row (SMA-200's ~260-trading-day warm-up)
+- `src/models/{train_global,registry,predict}.py` — the missing persistence link: fits the same candidates notebook 05 always did, selects by validation ROC-AUC, and actually saves the winner (`joblib`) plus a JSON registry entry (training universe, feature schema version, validation metrics)
+- `src/services/company_analysis.py::analyze_company()` — the live orchestrator: one fetch → shared feature snapshot → global model → risk/entry-exit/SHAP → best-effort fundamentals/news/RAG, each independently degrading to `"available": false` with a reason on failure, never fabricating a result
+- `src/models/evaluate_holdout_companies.py` — splits `UNIVERSE`'s tickers (not dates) into train/holdout subsets; held-out companies scored ROC-AUC 0.525 vs 0.512 for seen companies — both near coin-flip, reinforcing (not contradicting) this project's existing "no demonstrated edge" finding, and confirming the architecture works technically without claiming a real predictive edge in either direction
+- `POST /analysis`, `GET /company/{id}/resolve` (`src/api/main.py`) and the dashboard's "Analyze Any Company" tab — additive, alongside the original precomputed-50-stock routes/tabs
+
+**Real bug found by running the live path against real data, not caught by a unit test:** a live `period="5y"` yfinance pull can include a trailing row for today's still-open session — real `open`/`volume`, `NaN` close — which silently NaN'd every downstream technical feature for the "latest" row. Fixed by dropping rows with no close before computing indicators.
+
+**Test suite:** 36 new tests (resolver, eligibility, registry, predict, train_global, holdout-generalization, orchestrator, API, dashboard client) — 191 total.
+
+---
+
+## Phase 16 — Website Audit Remediation: Single-Snapshot Consistency, Calibrated Signals, Lineage
+
+A user audit of the deployed dashboard found contradictory numbers (header close next to a forecast computed from a different price) and a mathematically "backwards" long-trade stop-loss. Investigation found and fixed the actual root cause, plus added several transparency/calibration features the audit requested.
+
+- [x] Trace and fix the cross-table data-snapshot desync causing contradictory numbers
+- [x] Gate directional labels ("Bullish"/"Bearish") on model confidence, not probability alone
+- [x] Add a live price-quantile forecast to the orchestrator (previously only `probability_up`)
+- [x] Add a news-provider abstraction with live-fallback for the permanently-empty precomputed News tab
+- [x] Itemize backtest transaction costs and surface backtest underperformance prominently
+- [x] Separate fiscal-year fundamentals from today's valuation snapshot, each with its own as-of date
+- [x] Add a Data & Model Lineage panel
+
+**DoD:** Every snapshot-dependent number traces to one shared, inspectable "as of" date; a confidently-wrong directional label can't reach the UI; negative backtest performance is disclosed prominently, not buried. Met — verified against the real, independently-confirmed data: `prices_daily`/`technical_features` dated 2026-09-28 vs `model_predictions`/`entry_exit` dated 2026-09-21 (a week apart, because the notebooks producing them were last re-run on different days) — root cause of both the reported price mismatch and the "backwards" stop (the stop-loss formula itself was confirmed mathematically correct throughout).
+
+Built:
+- `src/validation/{snapshot,entry_exit,signal,freshness}.py` — `resolve_snapshot()` finds the one date every populated source table agrees on; `validate_long_setup()` flags logically inconsistent entry/stop/target ordering as INVALID rather than hiding it; `classify_signal()` gates direction on confidence (explicitly flagged as an uncalibrated starting policy, not validated against real calibration data); `trading_days_stale()`/`staleness_label()` use a trading-calendar-aware freshness policy
+- `src/api/main.py` — every snapshot-dependent route (`overview`, `technical`, `forecast`, `risk`, `entry-exit`, `explanation`) now serves the shared cross-table date instead of each independently picking its own; new `GET /stocks/{symbol}/snapshot` and `GET /stocks/{symbol}/lineage` routes; `/stocks/{symbol}/news` falls back to a live fetch when the precomputed table is empty
+- `src/models/{train_quantiles,predict_quantiles}.py` — persists a quantile-regression model the same way `train_global.py` persists the classifier, reusing `src/risk/quantiles.py`'s existing fit/predict machinery; held-out 80%-interval coverage reported honestly (75.9% — different from, and somewhat better than, the original Phase 8 notebook model's ~64%, most likely due to different hyperparameters between the two independently-trained models; neither number is hidden or reconciled)
+- `src/news/providers/{base,yahoo,chain}.py` — a `NewsProvider` interface with `YahooNewsProvider` as the only real implementation today and a `fetch_with_fallback()` chain; every-provider-failure and every-provider-empty both yield an empty result + recorded errors, never a fabricated sentiment
+- `src/backtesting/engine.py::compute_itemized_transaction_costs()` — itemized brokerage/STT/exchange-charges/SEBI-turnover-fee/stamp-duty/GST/slippage breakdown (illustrative research-grade approximations, documented as such), ~16.9bps round-trip, close to the original flat ~15bps estimate; `turnover()` (which measured position-occupancy, not portfolio turnover) renamed `active_position_rate()`, kept as a deprecated alias
+- `src/services/{context,lineage}.py` — `AnalysisContext` formalizes the live orchestrator's single-snapshot pattern into one inspectable object; `build_lineage_panel()` reuses `src/rag/documents.py`'s existing Tier 1–4/model_output source-reliability system — no new tiering logic invented
+- `notebooks/04_fundamental_features.ipynb` re-run (scoped to this one notebook, not the full pipeline) to backfill `fiscal_year`/`valuation_as_of` columns on `fundamentals_snapshot`, separating fiscal-year balance-sheet ratios from today's valuation snapshot
+- Dashboard: a top-of-page "Analysis as of" staleness badge, a prominent backtest-underperformance warning (net of costs: -56.2% vs -7.6% for buy-and-hold NIFTY 50), a Data & Model Lineage expander, and the live orchestrator's price-quantile range + horizon-disclosure note
+
+**Two real bugs found by actually running the fix, not by unit tests:**
+- SQLite stores a `date` column as either a bare `YYYY-MM-DD` or a full timestamp string depending on how a given table was populated; a bare-string `<=` comparison silently excluded same-day timestamped rows. Fixed with SQLite's `date()` function normalizing both sides of every comparison.
+- The dashboard's own backtest-warning code picked `strategy_cols[0]` after alphabetically sorting non-benchmark columns, which selected `strategy_gross` (looks fine next to the benchmark) instead of `strategy_net_of_cost` (the actually-damning comparison) — would have silently suppressed the exact warning this phase was built to add. Fixed by naming the `strategy_net_of_cost` column explicitly.
+
+**Also found during this phase, scoped to a disclosure-only fix:** requesting `horizon="60d"` silently returned the same 1-trading-day-ahead classifier prediction relabeled as a 60-day forecast (no horizon-specific model exists). The response now includes `served_horizon_days` and an explicit note; full multi-horizon model training is a legitimate separate future initiative, not undertaken here.
+
+**Test suite:** 64 new tests (`src/validation/`, news-provider chain, quantile train/predict, `AnalysisContext`/lineage, itemized costs, and snapshot-consistency regression tests that directly mirror the real repo's confirmed data drift) — 255 total.
+
+---
+
 ## How to use this file
 
 Work top to bottom. Check off items as completed. Do not begin a phase's work until the previous phase's DoD is satisfied — this is the core discipline the source planning document calls out repeatedly (avoid building the whole system at once; each phase must leave you with something that actually runs).
